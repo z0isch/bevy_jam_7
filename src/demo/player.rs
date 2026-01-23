@@ -8,6 +8,7 @@ use bevy::{
 use crate::{
     AppSystems, PausableSystems,
     asset_tracking::LoadResource,
+    audio::sound_effect,
     demo::{
         animation::PlayerAnimation,
         movement::{MovementController, ScreenWrap},
@@ -21,6 +22,15 @@ pub(super) fn plugin(app: &mut App) {
     app.add_systems(
         Update,
         record_player_directional_input
+            .in_set(AppSystems::RecordInput)
+            .in_set(PausableSystems),
+    );
+
+    // Record space for quack.
+    app.add_systems(
+        Update,
+        quack_on_space
+            .run_if(resource_exists::<PlayerAssets>)
             .in_set(AppSystems::RecordInput)
             .in_set(PausableSystems),
     );
@@ -62,6 +72,16 @@ pub fn player(
 #[reflect(Component)]
 struct Player;
 
+fn quack_on_space(
+    input: Res<ButtonInput<KeyCode>>,
+    player_assets: Res<PlayerAssets>,
+    mut commands: Commands,
+) {
+    if input.just_pressed(KeyCode::Space) {
+        commands.spawn(sound_effect(player_assets.quack.clone()));
+    }
+}
+
 fn record_player_directional_input(
     input: Res<ButtonInput<KeyCode>>,
     mut controller_query: Query<&mut MovementController, With<Player>>,
@@ -97,6 +117,8 @@ pub struct PlayerAssets {
     #[dependency]
     ducky: Handle<Image>,
     #[dependency]
+    quack: Handle<AudioSource>,
+    #[dependency]
     pub steps: Vec<Handle<AudioSource>>,
 }
 
@@ -111,6 +133,7 @@ impl FromWorld for PlayerAssets {
                     settings.sampler = ImageSampler::nearest();
                 },
             ),
+            quack: assets.load("audio/sound_effects/quack.ogg"),
             steps: vec![
                 assets.load("audio/sound_effects/step1.ogg"),
                 assets.load("audio/sound_effects/step2.ogg"),
