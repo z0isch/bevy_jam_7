@@ -5,7 +5,7 @@
 use bevy::{
     core_pipeline::{
         FullscreenShader,
-        core_3d::graph::{Core3d, Node3d},
+        core_2d::graph::{Core2d, Node2d},
     },
     ecs::query::QueryItem,
     prelude::*,
@@ -29,7 +29,7 @@ use bevy::{
 
 const SHADER_ASSET_PATH: &str = "shaders/crt.wgsl";
 
-/// Plugin that adds CRT post-processing effect to 3D cameras
+/// Plugin that adds CRT post-processing effect to 2D cameras
 pub struct CrtPostProcessPlugin;
 
 impl Plugin for CrtPostProcessPlugin {
@@ -39,6 +39,7 @@ impl Plugin for CrtPostProcessPlugin {
             UniformComponentPlugin::<CrtSettings>::default(),
         ));
         app.add_systems(Update, update_crt_time);
+
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
@@ -47,15 +48,15 @@ impl Plugin for CrtPostProcessPlugin {
 
         render_app
             .add_render_graph_node::<ViewNodeRunner<CrtPostProcessNode>>(
-                Core3d,
+                Core2d,
                 CrtPostProcessLabel,
             )
             .add_render_graph_edges(
-                Core3d,
+                Core2d,
                 (
-                    Node3d::Tonemapping,
+                    Node2d::Tonemapping,
                     CrtPostProcessLabel,
-                    Node3d::EndMainPassPostProcessing,
+                    Node2d::EndMainPassPostProcessing,
                 ),
             );
     }
@@ -180,8 +181,8 @@ fn init_crt_pipeline(
 }
 
 /// Settings for the CRT post-processing effect.
-/// Add this component to a Camera3d to enable the effect.
-#[derive(Component, Clone, Copy, ExtractComponent, ShaderType, Reflect)]
+/// Add this component to a Camera2d to enable the effect.
+#[derive(Component, Clone, Copy, ExtractComponent, ShaderType)]
 pub struct CrtSettings {
     /// Scanline intensity (0.0 = no scanlines, 1.0 = full intensity)
     pub scanline_intensity: f32,
