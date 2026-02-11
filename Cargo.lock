@@ -1073,9 +1073,11 @@ dependencies = [
  "bevy",
  "bevy-inspector-egui",
  "bevy_enhanced_input",
+ "bevy_mesh",
  "bevy_rand",
  "bevy_rapier3d",
  "bevy_seedling",
+ "bevy_sprite3d",
  "getrandom",
  "rand",
  "tracing",
@@ -1545,6 +1547,15 @@ dependencies = [
  "radsort",
  "tracing",
  "wgpu-types",
+]
+
+[[package]]
+name = "bevy_sprite3d"
+version = "8.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4d48211f81bf10733ae4b4e90311a62b3ec72f2a80d100ad24be78676d7ecc5"
+dependencies = [
+ "bevy",
 ]
 
 [[package]]

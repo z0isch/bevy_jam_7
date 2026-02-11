@@ -40,6 +40,8 @@ bevy_rand = { version = "0.13", features = [
     "wasm_js",
 ] }
 bevy_rapier3d = { git = "https://github.com/Buncys/bevy_rapier", branch = "bevy-0.18.0" }
+bevy_sprite3d = "8.0"
+bevy_mesh = "0.18.0"
 
 # Compile out low-severity logs to improve performance.
 # Remove these features if you want to profile your game with tracy.

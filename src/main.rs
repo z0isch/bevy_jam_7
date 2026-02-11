@@ -4,6 +4,7 @@
 #![cfg_attr(not(feature = "dev"), windows_subsystem = "windows")]
 
 mod asset_tracking;
+mod crt_postprocess;
 #[cfg(feature = "dev")]
 mod dev_tools;
 mod game;
@@ -15,6 +16,9 @@ use bevy::{asset::AssetMetaCheck, camera::ScalingMode, prelude::*};
 use bevy_rand::{plugin::EntropyPlugin, prelude::WyRand};
 use bevy_rapier3d::prelude::*;
 use bevy_seedling::SeedlingPlugin;
+use bevy_sprite3d::prelude::*;
+
+use crate::crt_postprocess::{CrtPostProcessPlugin, CrtSettings};
 
 fn main() -> AppExit {
     App::new().add_plugins(AppPlugin).run()
@@ -45,10 +49,26 @@ impl Plugin for AppPlugin {
                 }),
         );
 
+        // Set up the `Pause` state.
+        app.init_state::<Pause>();
+        app.configure_sets(Update, PausableSystems.run_if(in_state(Pause(false))));
+        app.configure_sets(FixedUpdate, PausableSystems.run_if(in_state(Pause(false))));
+
         app.add_plugins(SeedlingPlugin::default());
-        app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default());
+        app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default().in_fixed_schedule());
+        app.configure_sets(
+            FixedUpdate,
+            (
+                PhysicsSet::SyncBackend,
+                PhysicsSet::StepSimulation,
+                PhysicsSet::Writeback,
+            )
+                .in_set(PausableSystems),
+        );
         app.add_plugins(EntropyPlugin::<WyRand>::default());
         // app.add_plugins(RapierDebugRenderPlugin::default());
+        app.add_plugins(Sprite3dPlugin);
+        app.add_plugins(CrtPostProcessPlugin);
 
         // Add other plugins.
         app.add_plugins((
@@ -60,10 +80,6 @@ impl Plugin for AppPlugin {
             theme::plugin,
             game::plugin,
         ));
-
-        // Set up the `Pause` state.
-        app.init_state::<Pause>();
-        app.configure_sets(Update, PausableSystems.run_if(in_state(Pause(false))));
 
         // Spawn the main camera.
         app.add_systems(Startup, spawn_camera);
@@ -88,14 +104,24 @@ fn spawn_camera(mut commands: Commands) {
     let offset = Vec3::new(20.0, 20.0, 20.0);
     commands.spawn((
         Camera3d::default(),
+        CrtSettings {
+            scanline_intensity: 0.3,
+            scanline_count: 200.0,
+            curvature: 0.05,
+            vignette_intensity: 0.8,
+            chromatic_aberration: 0.04,
+            brightness: 1.0,
+            noise_intensity: 0.005,
+            ..default()
+        },
         IsometricCamera { offset },
         AmbientLight {
-            brightness: 100.0,
+            brightness: 75.0,
             ..default()
         },
         Projection::from(OrthographicProjection {
             scaling_mode: ScalingMode::FixedVertical {
-                viewport_height: 30.0,
+                viewport_height: 20.0,
             },
             ..OrthographicProjection::default_3d()
         }),
