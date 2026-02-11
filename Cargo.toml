@@ -27,7 +27,7 @@ bevy = { version = "0.18.0", default-features = false, features = [
     "std",
     "sysinfo_plugin",
     "wayland",
-    "webgpu",
+    "webgl2",
     "x11",
 ] }
 rand = "0.9"
