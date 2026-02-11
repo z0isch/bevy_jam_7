@@ -6,6 +6,7 @@ use bevy::{
     core_pipeline::{
         FullscreenShader,
         core_2d::graph::{Core2d, Node2d},
+        core_3d::graph::{Core3d, Node3d},
     },
     ecs::query::QueryItem,
     prelude::*,
@@ -57,6 +58,20 @@ impl Plugin for CrtPostProcessPlugin {
                     Node2d::Tonemapping,
                     CrtPostProcessLabel,
                     Node2d::EndMainPassPostProcessing,
+                ),
+            );
+
+        render_app
+            .add_render_graph_node::<ViewNodeRunner<CrtPostProcessNode>>(
+                Core3d,
+                CrtPostProcessLabel,
+            )
+            .add_render_graph_edges(
+                Core3d,
+                (
+                    Node3d::Tonemapping,
+                    CrtPostProcessLabel,
+                    Node3d::EndMainPassPostProcessing,
                 ),
             );
     }
@@ -181,7 +196,7 @@ fn init_crt_pipeline(
 }
 
 /// Settings for the CRT post-processing effect.
-/// Add this component to a Camera2d to enable the effect.
+/// Add this component to a Camera2d or Camera3d to enable the effect.
 #[derive(Component, Clone, Copy, ExtractComponent, ShaderType)]
 pub struct CrtSettings {
     /// Scanline intensity (0.0 = no scanlines, 1.0 = full intensity)
