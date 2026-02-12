@@ -141,7 +141,7 @@ pub fn spawn_game(
         Visibility::default(),
         RigidBody::KinematicPositionBased,
         Collider::cuboid(0.5, 0.5, 0.5),
-        Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+        Transform::from_translation(Vec3::new(0.0, 1.0, 0.0)),
         KinematicCharacterController {
             apply_impulse_to_dynamic_bodies: true,
             ..KinematicCharacterController::default()
@@ -151,7 +151,7 @@ pub fn spawn_game(
                 Name::new("Player Spotlight"),
                 DespawnOnExit(Screen::Gameplay),
                 PlayerSpotlight,
-                Transform::from_xyz(0.0, 0.2, 0.0),
+                Transform::from_xyz(0.0, -0.8, 0.0),
                 SpotLight {
                     color: LIGHT_COLOR,
                     outer_angle: 0.4,
@@ -163,9 +163,10 @@ pub fn spawn_game(
             ),
             (
                 DespawnOnExit(Screen::Gameplay),
+                Visibility::default(),
                 SceneRoot(assets.vox0.clone()),
                 Transform::from_scale(vec3(0.125, 0.06, 0.125))
-                    .with_translation(vec3(-1., 0., -0.5))
+                    .with_translation(vec3(-1., -1., -0.5))
             ),
             (
                 Name::new("Player Down Spotlight"),
@@ -181,7 +182,7 @@ pub fn spawn_game(
             ),
         ],
     ));
-    for i in 0..10 {
+    for i in 0..15 {
         let x = rng.random_range(-50.0..50.0);
         let z = rng.random_range(-50.0..50.0);
         let speed_factor = rng.random_range(2.0..4.0);
@@ -200,7 +201,7 @@ pub fn spawn_game(
             Name::new(format!("Enemy {}", i)),
             RigidBody::Dynamic,
             Collider::cuboid(0.5, 0.5, 0.5),
-            Transform::from_translation(vec3(x, 0., z)),
+            Transform::from_translation(vec3(x, 1., z)),
             Velocity::default(),
             ExternalForce::default(),
             Damping {
@@ -213,9 +214,10 @@ pub fn spawn_game(
             children![
                 (
                     DespawnOnExit(Screen::Gameplay),
+                    Visibility::default(),
                     SceneRoot(vox),
                     Transform::from_scale(vec3(0.125, 0.06, 0.125))
-                        .with_translation(vec3(-1., 0., -0.5))
+                        .with_translation(vec3(-1., -1., -0.5))
                 ),
                 (
                     Name::new("Enemy Down Spotlight"),

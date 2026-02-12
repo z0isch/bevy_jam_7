@@ -67,7 +67,7 @@ impl Plugin for AppPlugin {
                 .in_set(PausableSystems),
         );
         app.add_plugins(EntropyPlugin::<WyRand>::default());
-        // app.add_plugins(RapierDebugRenderPlugin::default());
+
         app.add_plugins(Sprite3dPlugin);
         app.add_plugins(CrtPostProcessPlugin);
         app.add_plugins(VoxPlugin { swap_yz: true });
@@ -118,7 +118,7 @@ fn spawn_camera(mut commands: Commands) {
         IsometricCamera { offset },
         AmbientLight {
             color: game::LIGHT_COLOR,
-            brightness: 35.0,
+            brightness: 50.0,
             ..default()
         },
         Projection::from(OrthographicProjection {
