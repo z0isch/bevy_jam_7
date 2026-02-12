@@ -31,6 +31,8 @@ pub(super) fn plugin(app: &mut App) {
             check_torch,
             on_torchlit,
             on_un_torchlit,
+            enemy_size,
+            enemy_health,
         )
             .in_set(PausableSystems),
     );
@@ -98,14 +100,20 @@ struct Enemy;
 #[derive(Component)]
 struct Spotlighted;
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
 struct SpeedFactor(f32);
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
 struct Torch(f32);
 
 #[derive(Component)]
 struct Torchlit;
+
+#[derive(Component, Reflect)]
+struct Health(f32);
+
+#[derive(Component)]
+struct Vox;
 
 pub fn spawn_game(
     mut commands: Commands,
@@ -143,6 +151,8 @@ pub fn spawn_game(
         Visibility::default(),
         Transform::from_xyz(3.0, 0., 3.0),
         Torch(torch_range),
+        RigidBody::Fixed,
+        Collider::cuboid(0.5, 0.5, 0.5),
         children![
             (
                 Visibility::default(),
@@ -182,7 +192,6 @@ pub fn spawn_game(
         Collider::cuboid(0.5, 0.5, 0.5),
         Transform::from_translation(Vec3::new(0.0, 1.0, 0.0)),
         KinematicCharacterController {
-            apply_impulse_to_dynamic_bodies: true,
             ..KinematicCharacterController::default()
         },
         children![
@@ -231,7 +240,7 @@ pub fn spawn_game(
                 Visibility::default(),
                 SceneRoot(assets.vox0.clone()),
                 Transform::from_scale(vec3(0.125, 0.06, 0.125))
-                    .with_translation(vec3(-1., -1., -0.5))
+                    .with_translation(vec3(-0.9, -1., -0.5))
             ),
             (
                 Name::new("Player Down Spotlight"),
@@ -247,7 +256,7 @@ pub fn spawn_game(
             ),
         ],
     ));
-    for i in 0..10 {
+    for i in 0..30 {
         let x = rng.random_range(-50.0..50.0);
         let z = rng.random_range(-50.0..50.0);
         let speed_factor = rng.random_range(2.0..4.0);
@@ -276,13 +285,14 @@ pub fn spawn_game(
             LockedAxes::TRANSLATION_LOCKED_Y | LockedAxes::ROTATION_LOCKED,
             Ccd::enabled(),
             SpeedFactor(speed_factor),
+            Health(100.),
             children![
                 (
                     DespawnOnExit(Screen::Gameplay),
                     Visibility::default(),
-                    SceneRoot(vox),
                     Transform::from_scale(vec3(0.125, 0.06, 0.125))
-                        .with_translation(vec3(-1., -1., -0.5))
+                        .with_translation(vec3(-1., -1., -0.5)),
+                    children![(SceneRoot(vox), Vox, Transform::default())]
                 ),
                 (
                     Name::new("Enemy Down Spotlight"),
@@ -442,9 +452,9 @@ fn check_torch(
     }
     for (entity, _, _) in &enemies {
         if hit_enemies.contains(&entity) {
-            commands.entity(entity).insert(Torchlit);
+            commands.entity(entity).try_insert(Torchlit);
         } else {
-            commands.entity(entity).remove::<Torchlit>();
+            commands.entity(entity).try_remove::<Torchlit>();
         }
     }
 }
@@ -452,24 +462,12 @@ fn check_torch(
 fn check_spotlight(
     mut commands: Commands,
     rapier_context: ReadRapierContext,
-    enemies: Query<(Entity, &GlobalTransform, Ref<Transform>), With<Enemy>>,
-    spotlights: Query<(&GlobalTransform, &SpotLight, Ref<Transform>), With<PlayerSpotlight>>,
+    enemies: Query<(Entity, &GlobalTransform), With<Enemy>>,
+    spotlights: Query<(&GlobalTransform, &SpotLight), With<PlayerSpotlight>>,
 ) {
     let rapier_context = rapier_context.single().unwrap();
     let mut hit_enemies = std::collections::HashSet::new();
-    for (spotlight_transform, spotlight, spotlight_changed) in spotlights {
-        if !spotlight_changed.is_changed()
-            && enemies
-                .iter()
-                .all(|(_, enemy_transform, enemy_transform_changed)| {
-                    let d = enemy_transform
-                        .translation()
-                        .distance(spotlight_transform.translation());
-                    !enemy_transform_changed.is_changed() || d >= spotlight.range
-                })
-        {
-            continue;
-        };
+    for (spotlight_transform, spotlight) in spotlights {
         let ray_dir = spotlight_transform.forward().normalize();
         // Create a cone collider for the spotlight area.
         // half_height = how far the cone extends, radius = spread at the far end.
@@ -500,11 +498,11 @@ fn check_spotlight(
             },
         );
     }
-    for (entity, _, _) in &enemies {
+    for (entity, _) in &enemies {
         if hit_enemies.contains(&entity) {
-            commands.entity(entity).insert(Spotlighted);
+            commands.entity(entity).try_insert(Spotlighted);
         } else {
-            commands.entity(entity).remove::<Spotlighted>();
+            commands.entity(entity).try_remove::<Spotlighted>();
         }
     }
 }
@@ -541,6 +539,38 @@ fn enemy_chase_player(
             let force_strength = 20.0;
             ext_force.force = (desired_vel - velocity.linvel) * force_strength;
             ext_force.force.y = 0.0;
+        }
+    }
+}
+
+fn enemy_size(
+    enemies: Query<(&Health, &Children), (With<Enemy>, Changed<Health>)>,
+    children2_query: Query<&Children>,
+    mut vox: Query<&mut Transform, With<Vox>>,
+) {
+    for (health, children) in enemies {
+        let scale = 0.60 + (health.0 / 100.0) * 0.40;
+        for child in children {
+            if let Ok(children2) = children2_query.get(*child) {
+                for child2 in children2 {
+                    if let Ok(mut transform) = vox.get_mut(*child2) {
+                        transform.scale = Vec3::splat(scale);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn enemy_health(
+    mut commands: Commands,
+    enemies: Query<(Entity, &mut Health), (With<Enemy>, Or<(With<Spotlighted>, With<Torchlit>)>)>,
+    time: Res<Time>,
+) {
+    for (entity, mut health) in enemies {
+        health.0 -= time.delta_secs() * 25.0;
+        if health.0 <= 0.0 {
+            commands.entity(entity).despawn();
         }
     }
 }

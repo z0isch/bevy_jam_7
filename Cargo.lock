@@ -1775,7 +1775,7 @@ dependencies = [
 [[package]]
 name = "bevy_vox"
 version = "0.17.0"
-source = "git+https://github.com/z0isch/bevy_vox#775bdeb06f681d8993260b1e7f4c02ff49775996"
+source = "git+https://github.com/z0isch/bevy_vox#67db7c8189e7d1275e9daf3d7be9bc38f1133b4f"
 dependencies = [
  "bevy",
  "dot_vox",
