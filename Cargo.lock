@@ -1078,6 +1078,7 @@ dependencies = [
  "bevy_rapier3d",
  "bevy_seedling",
  "bevy_sprite3d",
+ "bevy_vox",
  "getrandom",
  "rand",
  "tracing",
@@ -1772,6 +1773,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_vox"
+version = "0.17.0"
+source = "git+https://github.com/z0isch/bevy_vox#775bdeb06f681d8993260b1e7f4c02ff49775996"
+dependencies = [
+ "bevy",
+ "dot_vox",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "bevy_window"
 version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2382,6 +2393,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95249b50c6c185bee49034bcb378a49dc2b5dff0be90ff6616d31d64febab05d"
 dependencies = [
  "litrs",
+]
+
+[[package]]
+name = "dot_vox"
+version = "5.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f160bf661e495a80ec98ac88a6535f5c80c02d2271c7013af70fe9ec670ccbff"
+dependencies = [
+ "ahash",
+ "lazy_static",
+ "log",
+ "nom",
 ]
 
 [[package]]
@@ -3914,6 +3937,15 @@ name = "nohash-hasher"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
+
+[[package]]
+name = "nom"
+version = "8.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df9761775871bdef83bee530e60050f7e54b1105350d6884eb0fb4f46c2f9405"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "nonmax"

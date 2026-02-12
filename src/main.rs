@@ -17,6 +17,7 @@ use bevy_rand::{plugin::EntropyPlugin, prelude::WyRand};
 use bevy_rapier3d::prelude::*;
 use bevy_seedling::SeedlingPlugin;
 use bevy_sprite3d::prelude::*;
+use bevy_vox::VoxPlugin;
 
 use crate::crt_postprocess::{CrtPostProcessPlugin, CrtSettings};
 
@@ -69,7 +70,7 @@ impl Plugin for AppPlugin {
         // app.add_plugins(RapierDebugRenderPlugin::default());
         app.add_plugins(Sprite3dPlugin);
         app.add_plugins(CrtPostProcessPlugin);
-
+        app.add_plugins(VoxPlugin { swap_yz: true });
         // Add other plugins.
         app.add_plugins((
             asset_tracking::plugin,
@@ -116,7 +117,8 @@ fn spawn_camera(mut commands: Commands) {
         },
         IsometricCamera { offset },
         AmbientLight {
-            brightness: 75.0,
+            color: game::LIGHT_COLOR,
+            brightness: 35.0,
             ..default()
         },
         Projection::from(OrthographicProjection {

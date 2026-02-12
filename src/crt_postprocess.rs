@@ -197,7 +197,7 @@ fn init_crt_pipeline(
 
 /// Settings for the CRT post-processing effect.
 /// Add this component to a Camera2d or Camera3d to enable the effect.
-#[derive(Component, Clone, Copy, ExtractComponent, ShaderType)]
+#[derive(Component, Clone, Copy, ExtractComponent, ShaderType, Reflect)]
 pub struct CrtSettings {
     /// Scanline intensity (0.0 = no scanlines, 1.0 = full intensity)
     pub scanline_intensity: f32,

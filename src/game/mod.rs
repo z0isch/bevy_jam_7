@@ -11,6 +11,8 @@ use rand::Rng;
 
 use crate::{IsometricCamera, PausableSystems, asset_tracking::LoadResource, screens::Screen};
 
+pub const LIGHT_COLOR: Color = Color::srgb(1., 195. / 255., 0.0);
+
 pub(super) fn plugin(app: &mut App) {
     app.load_resource::<GameAssets>();
     app.add_plugins(EnhancedInputPlugin);
@@ -35,6 +37,18 @@ pub(super) fn plugin(app: &mut App) {
 pub struct GameAssets {
     #[dependency]
     grass_texture: Handle<Image>,
+    #[dependency]
+    vox0: Handle<Scene>,
+    #[dependency]
+    vox1: Handle<Scene>,
+    #[dependency]
+    vox2: Handle<Scene>,
+    #[dependency]
+    vox3: Handle<Scene>,
+    #[dependency]
+    vox4: Handle<Scene>,
+    #[dependency]
+    vox5: Handle<Scene>,
 }
 
 impl FromWorld for GameAssets {
@@ -51,6 +65,12 @@ impl FromWorld for GameAssets {
                     });
                 },
             ),
+            vox0: assets.load("vox/Zeds-0-Zed_1.vox"),
+            vox1: assets.load("vox/Zeds-1-Zed_2.vox"),
+            vox2: assets.load("vox/Zeds-2-Zed_3.vox"),
+            vox3: assets.load("vox/Zeds-3-Zed_4.vox"),
+            vox4: assets.load("vox/Zeds-4-Zed_5.vox"),
+            vox5: assets.load("vox/Zeds-5-Zed_6.vox"),
         }
     }
 }
@@ -83,6 +103,7 @@ pub fn spawn_game(
 ) {
     commands.spawn((
         DespawnOnExit(Screen::Gameplay),
+        Visibility::default(),
         Mesh3d(meshes.add({
             let mut mesh = Plane3d::default().mesh().size(1000.0, 1000.0).build();
             if let Some(VertexAttributeValues::Float32x2(uvs)) =
@@ -102,7 +123,6 @@ pub fn spawn_game(
         })),
         Collider::cuboid(1000.0, 0., 1000.0),
     ));
-
     commands.spawn((
         Name::new("Player"),
         DespawnOnExit(Screen::Gameplay),
@@ -118,44 +138,69 @@ pub fn spawn_game(
                 )),
             ),
         ]),
+        Visibility::default(),
         RigidBody::KinematicPositionBased,
         Collider::cuboid(0.5, 0.5, 0.5),
-        Transform::from_xyz(0.0, 1., 0.0),
+        Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
         KinematicCharacterController {
             apply_impulse_to_dynamic_bodies: true,
             ..KinematicCharacterController::default()
         },
-        Mesh3d(meshes.add(Cuboid::default())),
-        MeshMaterial3d(materials.add(Color::srgb(0.0, 0.0, 1.0))),
-        children![(
-            Name::new("Player Spotlight"),
-            DespawnOnExit(Screen::Gameplay),
-            PlayerSpotlight,
-            Transform::from_xyz(0.0, 0.0, 0.0),
-            SpotLight {
-                color: Color::srgb(1., 195. / 255., 0.0),
-                shadows_enabled: true,
-                outer_angle: 0.4,
-                inner_angle: 0.3,
-                range: 8.,
-                intensity: 10000000.0,
-                ..default()
-            },
-        )],
+        children![
+            (
+                Name::new("Player Spotlight"),
+                DespawnOnExit(Screen::Gameplay),
+                PlayerSpotlight,
+                Transform::from_xyz(0.0, 0.2, 0.0),
+                SpotLight {
+                    color: LIGHT_COLOR,
+                    outer_angle: 0.4,
+                    inner_angle: 0.3,
+                    range: 8.,
+                    intensity: 10000000.0,
+                    ..default()
+                },
+            ),
+            (
+                DespawnOnExit(Screen::Gameplay),
+                SceneRoot(assets.vox0.clone()),
+                Transform::from_scale(vec3(0.125, 0.06, 0.125))
+                    .with_translation(vec3(-1., 0., -0.5))
+            ),
+            (
+                Name::new("Player Down Spotlight"),
+                DespawnOnExit(Screen::Gameplay),
+                Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+                SpotLight {
+                    color: LIGHT_COLOR,
+                    outer_angle: 1.,
+                    range: 8.,
+                    intensity: 100000.0,
+                    ..default()
+                },
+            ),
+        ],
     ));
     for i in 0..10 {
         let x = rng.random_range(-50.0..50.0);
         let z = rng.random_range(-50.0..50.0);
         let speed_factor = rng.random_range(2.0..4.0);
+        let vox = match rng.random_range(1..6) {
+            1 => assets.vox1.clone(),
+            2 => assets.vox2.clone(),
+            3 => assets.vox3.clone(),
+            4 => assets.vox4.clone(),
+            5 => assets.vox5.clone(),
+            _ => unreachable!(),
+        };
         commands.spawn((
             DespawnOnExit(Screen::Gameplay),
+            Visibility::default(),
             Enemy,
             Name::new(format!("Enemy {}", i)),
-            Mesh3d(meshes.add(Cuboid::default())),
-            MeshMaterial3d(materials.add(Color::srgb(1.0, 0., 0.))),
             RigidBody::Dynamic,
             Collider::cuboid(0.5, 0.5, 0.5),
-            Transform::from_xyz(x, 1., z).with_rotation(Quat::from_rotation_y(60_f32.to_radians())),
+            Transform::from_translation(vec3(x, 0., z)),
             Velocity::default(),
             ExternalForce::default(),
             Damping {
@@ -165,28 +210,61 @@ pub fn spawn_game(
             LockedAxes::TRANSLATION_LOCKED_Y | LockedAxes::ROTATION_LOCKED,
             Ccd::enabled(),
             SpeedFactor(speed_factor),
+            children![
+                (
+                    DespawnOnExit(Screen::Gameplay),
+                    SceneRoot(vox),
+                    Transform::from_scale(vec3(0.125, 0.06, 0.125))
+                        .with_translation(vec3(-1., 0., -0.5))
+                ),
+                (
+                    Name::new("Enemy Down Spotlight"),
+                    DespawnOnExit(Screen::Gameplay),
+                    EnemySpotlight,
+                    Visibility::Hidden,
+                    Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+                    SpotLight {
+                        color: LIGHT_COLOR,
+                        outer_angle: 1.,
+                        range: 8.,
+                        intensity: 100000.0,
+                        ..default()
+                    },
+                )
+            ],
         ));
     }
 }
 
 fn on_un_spotlighted(
     mut removed: RemovedComponents<Spotlighted>,
-    mut enemies: Query<&mut MeshMaterial3d<StandardMaterial>, With<Enemy>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    enemies: Query<&Children>,
+    mut enemy_spotlights: Query<&mut Visibility, With<EnemySpotlight>>,
 ) {
     for e in removed.read() {
-        if let Ok(mut material) = enemies.get_mut(e) {
-            material.0 = materials.add(Color::srgb(1.0, 0., 0.));
+        if let Ok(children) = enemies.get(e) {
+            for &child in children {
+                if let Ok(mut light) = enemy_spotlights.get_mut(child) {
+                    *light = Visibility::Hidden;
+                }
+            }
         }
     }
 }
 
+#[derive(Component)]
+struct EnemySpotlight;
+
 fn on_spotlighted(
-    enemies: Query<&mut MeshMaterial3d<StandardMaterial>, (With<Enemy>, Added<Spotlighted>)>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    enemies: Query<&Children, (With<Enemy>, Added<Spotlighted>)>,
+    mut enemy_spotlights: Query<&mut Visibility, With<EnemySpotlight>>,
 ) {
-    for mut material in enemies {
-        material.0 = materials.add(Color::srgb(0.0, 1., 0.));
+    for children in enemies {
+        for &child in children {
+            if let Ok(mut light) = enemy_spotlights.get_mut(child) {
+                *light = Visibility::Visible;
+            }
+        }
     }
 }
 
@@ -209,8 +287,7 @@ fn apply_movement(
 fn aim_spotlight(
     window: Single<&Window, With<PrimaryWindow>>,
     camera: Single<(&Camera, &GlobalTransform)>,
-    player: Single<&GlobalTransform, With<Player>>,
-    mut spotlight: Single<&mut Transform, (With<PlayerSpotlight>, Without<Player>)>,
+    mut player: Single<&mut Transform, With<Player>>,
 ) {
     if let Some(cursor_pos) = window.cursor_position()
         && let Ok(ray) = camera.0.viewport_to_world(camera.1, cursor_pos)
@@ -221,14 +298,13 @@ fn aim_spotlight(
             let t = (ground_y - ray.origin.y) / denom;
             if t >= 0.0 {
                 let mouse_ground = ray.origin + *ray.direction * t;
-                let player_pos = player.translation();
+                let player_pos = player.translation;
 
                 let direction = mouse_ground - player_pos;
                 let horizontal_direction =
                     Vec3::new(direction.x, 0.0, direction.z).normalize_or_zero();
-
                 if horizontal_direction != Vec3::ZERO {
-                    spotlight.look_to(horizontal_direction, Vec3::Y);
+                    player.look_to(horizontal_direction, Vec3::Y);
                 }
             }
         }
@@ -239,9 +315,11 @@ fn check_spotlight(
     mut commands: Commands,
     rapier_context: ReadRapierContext,
     enemies: Query<Entity, With<Enemy>>,
-    spotlights: Query<(&GlobalTransform, &SpotLight)>,
+    spotlights: Query<(&GlobalTransform, &SpotLight), With<PlayerSpotlight>>,
 ) {
     let rapier_context = rapier_context.single().unwrap();
+    // Collect all enemies overlapping with the cone.
+    let mut hit_enemies = std::collections::HashSet::new();
     for (spotlight_transform, spotlight) in spotlights {
         let ray_dir = spotlight_transform.forward().normalize();
         // Create a cone collider for the spotlight area.
@@ -260,8 +338,6 @@ fn check_spotlight(
 
         let filter = QueryFilter::default().exclude_sensors();
 
-        // Collect all enemies overlapping with the cone.
-        let mut hit_enemies = std::collections::HashSet::new();
         rapier_context.intersect_shape(
             shape_pos,
             shape_rot,
@@ -274,13 +350,12 @@ fn check_spotlight(
                 true // keep searching
             },
         );
-
-        for entity in &enemies {
-            if hit_enemies.contains(&entity) {
-                commands.entity(entity).insert(Spotlighted);
-            } else {
-                commands.entity(entity).remove::<Spotlighted>();
-            }
+    }
+    for entity in &enemies {
+        if hit_enemies.contains(&entity) {
+            commands.entity(entity).insert(Spotlighted);
+        } else {
+            commands.entity(entity).remove::<Spotlighted>();
         }
     }
 }
@@ -289,7 +364,7 @@ fn enemy_chase_player(
     player: Single<&Transform, (With<Player>, Without<Enemy>)>,
     mut enemies: Query<
         (
-            &Transform,
+            &mut Transform,
             &mut ExternalForce,
             &Velocity,
             &SpeedFactor,
@@ -300,7 +375,9 @@ fn enemy_chase_player(
 ) {
     let player_pos = player.translation;
 
-    for (enemy_transform, mut ext_force, velocity, speed_factor, is_spotlighted) in &mut enemies {
+    for (mut enemy_transform, mut ext_force, velocity, speed_factor, is_spotlighted) in &mut enemies
+    {
+        enemy_transform.look_at(player_pos, Vec3::Y);
         if is_spotlighted {
             ext_force.force = Vec3::ZERO;
             continue;
