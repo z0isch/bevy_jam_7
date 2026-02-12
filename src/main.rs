@@ -109,16 +109,16 @@ fn spawn_camera(mut commands: Commands) {
             scanline_intensity: 0.3,
             scanline_count: 200.0,
             curvature: 0.05,
-            vignette_intensity: 0.8,
-            chromatic_aberration: 0.04,
-            brightness: 1.0,
+            vignette_intensity: 1.,
+            chromatic_aberration: 0.01,
+            brightness: 8.0,
             noise_intensity: 0.005,
             ..default()
         },
         IsometricCamera { offset },
         AmbientLight {
             color: game::LIGHT_COLOR,
-            brightness: 75.0,
+            brightness: 35.0,
             ..default()
         },
         Projection::from(OrthographicProjection {

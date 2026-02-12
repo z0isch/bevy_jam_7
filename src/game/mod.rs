@@ -12,6 +12,7 @@ use rand::Rng;
 use crate::{IsometricCamera, PausableSystems, asset_tracking::LoadResource, screens::Screen};
 
 pub const LIGHT_COLOR: Color = Color::srgb(1., 195. / 255., 0.0);
+pub const TORCH_COLOR: Color = Color::srgb(1.0, 90. / 255., 30. / 255.);
 
 pub(super) fn plugin(app: &mut App) {
     app.load_resource::<GameAssets>();
@@ -27,6 +28,9 @@ pub(super) fn plugin(app: &mut App) {
             on_spotlighted,
             on_un_spotlighted,
             camera_follow,
+            check_torch,
+            on_torchlit,
+            on_un_torchlit,
         )
             .in_set(PausableSystems),
     );
@@ -49,6 +53,8 @@ pub struct GameAssets {
     vox4: Handle<Scene>,
     #[dependency]
     vox5: Handle<Scene>,
+    #[dependency]
+    lamp: Handle<Scene>,
 }
 
 impl FromWorld for GameAssets {
@@ -71,6 +77,7 @@ impl FromWorld for GameAssets {
             vox3: assets.load("vox/Zeds-3-Zed_4.vox"),
             vox4: assets.load("vox/Zeds-4-Zed_5.vox"),
             vox5: assets.load("vox/Zeds-5-Zed_6.vox"),
+            lamp: assets.load("vox/Lamp.vox"),
         }
     }
 }
@@ -93,6 +100,12 @@ struct Spotlighted;
 
 #[derive(Component)]
 struct SpeedFactor(f32);
+
+#[derive(Component)]
+struct Torch(f32);
+
+#[derive(Component)]
+struct Torchlit;
 
 pub fn spawn_game(
     mut commands: Commands,
@@ -123,6 +136,32 @@ pub fn spawn_game(
         })),
         Collider::cuboid(1000.0, 0., 1000.0),
     ));
+    let torch_range = 4.0;
+    commands.spawn((
+        Name::new("Torch"),
+        DespawnOnExit(Screen::Gameplay),
+        Visibility::default(),
+        Transform::from_xyz(3.0, 0., 3.0),
+        Torch(torch_range),
+        children![
+            (
+                Visibility::default(),
+                SceneRoot(assets.lamp.clone()),
+                Transform::from_scale(vec3(0.2, 0.2, 0.2))
+            ),
+            (
+                Transform::from_xyz(0.0, 2.5, 0.0),
+                PointLight {
+                    color: TORCH_COLOR,
+                    intensity: 100000.0,
+                    range: torch_range + 3.,
+                    radius: 4.,
+                    ..default()
+                }
+            )
+        ],
+    ));
+
     commands.spawn((
         Name::new("Player"),
         DespawnOnExit(Screen::Gameplay),
@@ -157,7 +196,7 @@ pub fn spawn_game(
                     outer_angle: 0.4,
                     inner_angle: 0.3,
                     range: 8.,
-                    intensity: 10000000.0,
+                    intensity: 500000.0,
                     ..default()
                 },
             ),
@@ -170,7 +209,7 @@ pub fn spawn_game(
                     outer_angle: 0.4,
                     inner_angle: 0.3,
                     range: 8.,
-                    intensity: 10000000.0,
+                    intensity: 500000.0,
                     ..default()
                 },
             ),
@@ -183,7 +222,7 @@ pub fn spawn_game(
                     outer_angle: 0.4,
                     inner_angle: 0.3,
                     range: 8.,
-                    intensity: 10000000.0,
+                    intensity: 500000.0,
                     ..default()
                 },
             ),
@@ -208,7 +247,7 @@ pub fn spawn_game(
             ),
         ],
     ));
-    for i in 0..15 {
+    for i in 0..10 {
         let x = rng.random_range(-50.0..50.0);
         let z = rng.random_range(-50.0..50.0);
         let speed_factor = rng.random_range(2.0..4.0);
@@ -258,6 +297,20 @@ pub fn spawn_game(
                         intensity: 100000.0,
                         ..default()
                     },
+                ),
+                (
+                    Name::new("Enemy Torchlit Spotlight"),
+                    DespawnOnExit(Screen::Gameplay),
+                    EnemyTorchSpotlight,
+                    Visibility::Hidden,
+                    Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+                    SpotLight {
+                        color: TORCH_COLOR,
+                        outer_angle: 1.,
+                        range: 8.,
+                        intensity: 100000.0,
+                        ..default()
+                    },
                 )
             ],
         ));
@@ -286,6 +339,38 @@ struct EnemySpotlight;
 fn on_spotlighted(
     enemies: Query<&Children, (With<Enemy>, Added<Spotlighted>)>,
     mut enemy_spotlights: Query<&mut Visibility, With<EnemySpotlight>>,
+) {
+    for children in enemies {
+        for &child in children {
+            if let Ok(mut light) = enemy_spotlights.get_mut(child) {
+                *light = Visibility::Visible;
+            }
+        }
+    }
+}
+
+#[derive(Component)]
+struct EnemyTorchSpotlight;
+
+fn on_un_torchlit(
+    mut removed: RemovedComponents<Torchlit>,
+    enemies: Query<&Children>,
+    mut enemy_spotlights: Query<&mut Visibility, With<EnemyTorchSpotlight>>,
+) {
+    for e in removed.read() {
+        if let Ok(children) = enemies.get(e) {
+            for &child in children {
+                if let Ok(mut light) = enemy_spotlights.get_mut(child) {
+                    *light = Visibility::Hidden;
+                }
+            }
+        }
+    }
+}
+
+fn on_torchlit(
+    enemies: Query<&Children, (With<Enemy>, Added<Torchlit>)>,
+    mut enemy_spotlights: Query<&mut Visibility, With<EnemyTorchSpotlight>>,
 ) {
     for children in enemies {
         for &child in children {
@@ -339,16 +424,52 @@ fn aim_spotlight(
     }
 }
 
+fn check_torch(
+    mut commands: Commands,
+    enemies: Query<(Entity, &GlobalTransform, Ref<Transform>), With<Enemy>>,
+    torches: Query<(&GlobalTransform, &Torch)>,
+) {
+    let mut hit_enemies = std::collections::HashSet::new();
+    for (torch_transform, torch) in torches {
+        for (entity, enemy_transform, _) in &enemies {
+            let d = torch_transform
+                .translation()
+                .distance(enemy_transform.translation());
+            if d <= torch.0 {
+                hit_enemies.insert(entity);
+            }
+        }
+    }
+    for (entity, _, _) in &enemies {
+        if hit_enemies.contains(&entity) {
+            commands.entity(entity).insert(Torchlit);
+        } else {
+            commands.entity(entity).remove::<Torchlit>();
+        }
+    }
+}
+
 fn check_spotlight(
     mut commands: Commands,
     rapier_context: ReadRapierContext,
-    enemies: Query<Entity, With<Enemy>>,
-    spotlights: Query<(&GlobalTransform, &SpotLight), With<PlayerSpotlight>>,
+    enemies: Query<(Entity, &GlobalTransform, Ref<Transform>), With<Enemy>>,
+    spotlights: Query<(&GlobalTransform, &SpotLight, Ref<Transform>), With<PlayerSpotlight>>,
 ) {
     let rapier_context = rapier_context.single().unwrap();
-    // Collect all enemies overlapping with the cone.
     let mut hit_enemies = std::collections::HashSet::new();
-    for (spotlight_transform, spotlight) in spotlights {
+    for (spotlight_transform, spotlight, spotlight_changed) in spotlights {
+        if !spotlight_changed.is_changed()
+            && enemies
+                .iter()
+                .all(|(_, enemy_transform, enemy_transform_changed)| {
+                    let d = enemy_transform
+                        .translation()
+                        .distance(spotlight_transform.translation());
+                    !enemy_transform_changed.is_changed() || d >= spotlight.range
+                })
+        {
+            continue;
+        };
         let ray_dir = spotlight_transform.forward().normalize();
         // Create a cone collider for the spotlight area.
         // half_height = how far the cone extends, radius = spread at the far end.
@@ -379,7 +500,7 @@ fn check_spotlight(
             },
         );
     }
-    for entity in &enemies {
+    for (entity, _, _) in &enemies {
         if hit_enemies.contains(&entity) {
             commands.entity(entity).insert(Spotlighted);
         } else {
@@ -397,16 +518,18 @@ fn enemy_chase_player(
             &Velocity,
             &SpeedFactor,
             Has<Spotlighted>,
+            Has<Torchlit>,
         ),
         With<Enemy>,
     >,
 ) {
     let player_pos = player.translation;
 
-    for (mut enemy_transform, mut ext_force, velocity, speed_factor, is_spotlighted) in &mut enemies
+    for (mut enemy_transform, mut ext_force, velocity, speed_factor, is_spotlighted, is_torchlit) in
+        &mut enemies
     {
         enemy_transform.look_at(player_pos, Vec3::Y);
-        if is_spotlighted {
+        if is_spotlighted || is_torchlit {
             ext_force.force = Vec3::ZERO;
             continue;
         }
