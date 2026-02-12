@@ -118,7 +118,7 @@ fn spawn_camera(mut commands: Commands) {
         IsometricCamera { offset },
         AmbientLight {
             color: game::LIGHT_COLOR,
-            brightness: 50.0,
+            brightness: 75.0,
             ..default()
         },
         Projection::from(OrthographicProjection {

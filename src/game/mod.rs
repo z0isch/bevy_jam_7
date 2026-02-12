@@ -162,6 +162,32 @@ pub fn spawn_game(
                 },
             ),
             (
+                Name::new("Player Spotlight2"),
+                DespawnOnExit(Screen::Gameplay),
+                Transform::from_xyz(0.0, 2., 0.0),
+                SpotLight {
+                    color: LIGHT_COLOR,
+                    outer_angle: 0.4,
+                    inner_angle: 0.3,
+                    range: 8.,
+                    intensity: 10000000.0,
+                    ..default()
+                },
+            ),
+            (
+                Name::new("Player Spotlight2"),
+                DespawnOnExit(Screen::Gameplay),
+                Transform::from_xyz(0.0, 1., 0.0),
+                SpotLight {
+                    color: LIGHT_COLOR,
+                    outer_angle: 0.4,
+                    inner_angle: 0.3,
+                    range: 8.,
+                    intensity: 10000000.0,
+                    ..default()
+                },
+            ),
+            (
                 DespawnOnExit(Screen::Gameplay),
                 Visibility::default(),
                 SceneRoot(assets.vox0.clone()),
