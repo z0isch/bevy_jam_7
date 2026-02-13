@@ -11,10 +11,11 @@ use bevy_rand::{global::GlobalRng, prelude::WyRand};
 use bevy_rapier3d::prelude::*;
 use rand::Rng;
 
-use crate::{asset_tracking::LoadResource, screens::Screen, IsometricCamera, PausableSystems};
+use crate::{IsometricCamera, PausableSystems, asset_tracking::LoadResource, screens::Screen};
 
 pub const LIGHT_COLOR: Color = Color::srgb(1., 195. / 255., 0.0);
 pub const TORCH_COLOR: Color = Color::srgb(1.0, 90. / 255., 30. / 255.);
+pub const MIRROR_COLOR: Color = Color::srgb(0.0, 200. / 255., 1.0);
 
 pub(super) fn plugin(app: &mut App) {
     app.load_resource::<GameAssets>();
@@ -167,8 +168,8 @@ pub struct CursedControls {
     pub aim_rotate_rad: f32,
     pub aim_wobble_rad: f32,
     pub aim_wobble_hz: f32,
-    pub aim_lag: f32,     // lower = more lag
-    pub aim_jitter: f32,  // world-units jitter
+    pub aim_lag: f32,    // lower = more lag
+    pub aim_jitter: f32, // world-units jitter
 }
 
 impl Default for CursedControls {
@@ -293,7 +294,7 @@ pub fn spawn_game(
         ..default()
     });
 
-    let mirror_pos = Vec3::new(2.5, mirror_half_extents.y, 0.0);
+    let mirror_pos = Vec3::new(15., mirror_half_extents.y, -5.0);
     let mirror_rot = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
 
     commands.spawn((
@@ -308,17 +309,29 @@ pub fn spawn_game(
         // physics / raycast target
         RigidBody::Fixed,
         Sensor,
-        Collider::cuboid(mirror_half_extents.x, mirror_half_extents.y, mirror_half_extents.z),
+        Collider::cuboid(
+            mirror_half_extents.x,
+            mirror_half_extents.y,
+            mirror_half_extents.z,
+        ),
         CollisionGroups::new(MIRROR_GROUP, Group::ALL),
         // visuals + helper light
         children![
-            (Mesh3d(frame_mesh), MeshMaterial3d(frame_mat), Transform::default()),
-            (Mesh3d(mirror_mesh), MeshMaterial3d(mirror_mat), Transform::default()),
+            (
+                Mesh3d(frame_mesh),
+                MeshMaterial3d(frame_mat),
+                Transform::default()
+            ),
+            (
+                Mesh3d(mirror_mesh),
+                MeshMaterial3d(mirror_mat),
+                Transform::default()
+            ),
             (
                 PointLight {
                     intensity: 2500.0,
                     range: 12.0,
-                    color: Color::srgb(0.25, 0.55, 1.0),
+                    color: LIGHT_COLOR,
                     ..default()
                 },
                 Transform::from_xyz(0.0, 0.0, 0.8)
@@ -330,17 +343,28 @@ pub fn spawn_game(
     commands.spawn((
         Name::new("Reflected Spotlight"),
         DespawnOnExit(Screen::Gameplay),
-        ReflectedSpotlight,
-        Visibility::Hidden,
-        Transform::from_xyz(0.0, 1.0, 0.0),
-        SpotLight {
-            color: LIGHT_COLOR,
-            outer_angle: 0.4,
-            inner_angle: 0.3,
-            range: 8.,
-            intensity: 250000.0,
-            ..default()
-        },
+        Transform::from_xyz(0.0, 0.0, 0.0),
+        Visibility::default(),
+        children![
+            (
+                ReflectedSpotlight,
+                SpotLight {
+                    color: MIRROR_COLOR,
+                    ..default()
+                },
+                Transform::from_xyz(0.0, 0.2, 0.0),
+                Visibility::Hidden,
+            ),
+            (
+                ReflectedSpotlight,
+                SpotLight {
+                    color: MIRROR_COLOR,
+                    ..default()
+                },
+                Transform::from_xyz(0.0, 2.0, 0.0),
+                Visibility::Hidden,
+            )
+        ],
     ));
 
     // Torch
@@ -399,6 +423,19 @@ pub fn spawn_game(
                 DespawnOnExit(Screen::Gameplay),
                 PlayerSpotlight,
                 Transform::from_xyz(0.0, -0.8, 0.0),
+                SpotLight {
+                    color: LIGHT_COLOR,
+                    outer_angle: 0.4,
+                    inner_angle: 0.3,
+                    range: 8.,
+                    intensity: 500000.0,
+                    ..default()
+                },
+            ),
+            (
+                Name::new("Player Spotlight2"),
+                DespawnOnExit(Screen::Gameplay),
+                Transform::from_xyz(0.0, 2., 0.0),
                 SpotLight {
                     color: LIGHT_COLOR,
                     outer_angle: 0.4,
@@ -614,8 +651,12 @@ fn aim_spotlight(
     mut aim_state: ResMut<CursedAimState>,
     mut rng: Single<&mut WyRand, With<GlobalRng>>,
 ) {
-    let Some(cursor_pos) = window.cursor_position() else { return };
-    let Ok(ray) = camera.0.viewport_to_world(camera.1, cursor_pos) else { return };
+    let Some(cursor_pos) = window.cursor_position() else {
+        return;
+    };
+    let Ok(ray) = camera.0.viewport_to_world(camera.1, cursor_pos) else {
+        return;
+    };
 
     let denom = ray.direction.y;
     if denom.abs() <= 1e-6 {
@@ -690,7 +731,7 @@ fn update_reflected_spotlight(
     mirrors: Query<(&GlobalTransform, &Mirror)>,
 
     // WRITE reflected spotlight; must be disjoint from the player spotlight
-    mut reflected: Single<
+    mut reflected_query: Query<
         (&mut Transform, &mut SpotLight, &mut Visibility),
         (With<ReflectedSpotlight>, Without<PlayerSpotlight>),
     >,
@@ -703,40 +744,39 @@ fn update_reflected_spotlight(
 
     // Raycast ONLY against mirrors
     let filter = QueryFilter::default().groups(CollisionGroups::new(Group::ALL, MIRROR_GROUP));
+    for (mut t, mut refl_light, mut vis) in reflected_query.iter_mut() {
+        let Some((hit_entity, toi)) = rapier.cast_ray(origin, dir, light.range, true, filter)
+        else {
+            *vis = Visibility::Hidden;
+            continue;
+        };
 
-    let Some((hit_entity, toi)) = rapier.cast_ray(origin, dir, light.range, true, filter) else {
-        *reflected.2 = Visibility::Hidden;
-        return;
-    };
+        let Ok((mirror_xform, mirror)) = mirrors.get(hit_entity) else {
+            *vis = Visibility::Hidden;
+            continue;
+        };
 
-    let Ok((mirror_xform, mirror)) = mirrors.get(hit_entity) else {
-        *reflected.2 = Visibility::Hidden;
-        return;
-    };
+        let hit_point = origin + dir * toi;
 
-    let hit_point = origin + dir * toi;
+        let n = (mirror_xform.rotation() * mirror.local_normal).normalize();
+        let r = (dir - 2.0 * dir.dot(n) * n).normalize_or_zero();
+        if r == Vec3::ZERO {
+            *vis = Visibility::Hidden;
+            continue;
+        }
 
-    let n = (mirror_xform.rotation() * mirror.local_normal).normalize();
-    let r = (dir - 2.0 * dir.dot(n) * n).normalize_or_zero();
-    if r == Vec3::ZERO {
-        *reflected.2 = Visibility::Hidden;
-        return;
+        let spawn_pos = hit_point + r * 0.15;
+
+        t.translation = spawn_pos;
+        t.rotation = Quat::from_rotation_arc(Vec3::NEG_Z, r);
+
+        refl_light.inner_angle = light.inner_angle;
+        refl_light.outer_angle = light.outer_angle;
+        refl_light.range = light.range * 2.;
+        refl_light.intensity = light.intensity * 1.5;
+
+        *vis = Visibility::Visible;
     }
-
-    let spawn_pos = hit_point + r * 0.15;
-
-    let (mut t, mut refl_light, mut vis) = reflected.into_inner();
-
-    t.translation = spawn_pos;
-    t.rotation = Quat::from_rotation_arc(Vec3::NEG_Z, r);
-
-    refl_light.color = light.color;
-    refl_light.inner_angle = light.inner_angle;
-    refl_light.outer_angle = light.outer_angle;
-    refl_light.range = light.range * 0.85;
-    refl_light.intensity = light.intensity * 0.45;
-
-    *vis = Visibility::Visible;
 }
 
 // ==============================
@@ -901,7 +941,10 @@ fn enemy_size(
 
 fn enemy_health(
     mut commands: Commands,
-    mut enemies: Query<(Entity, &mut Health), (With<Enemy>, Or<(With<Spotlighted>, With<Torchlit>)>)>,
+    mut enemies: Query<
+        (Entity, &mut Health),
+        (With<Enemy>, Or<(With<Spotlighted>, With<Torchlit>)>),
+    >,
     time: Res<Time>,
 ) {
     for (entity, mut health) in enemies.iter_mut() {
