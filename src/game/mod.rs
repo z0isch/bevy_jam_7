@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use bevy::{
     image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor},
     prelude::*,
@@ -13,17 +15,28 @@ use crate::{IsometricCamera, PausableSystems, asset_tracking::LoadResource, scre
 
 pub const LIGHT_COLOR: Color = Color::srgb(1., 195. / 255., 0.0);
 pub const TORCH_COLOR: Color = Color::srgb(1.0, 90. / 255., 30. / 255.);
+pub const MIRROR_COLOR: Color = Color::srgb(0.0, 200. / 255., 1.0);
 
 pub(super) fn plugin(app: &mut App) {
     app.load_resource::<GameAssets>();
     app.add_plugins(EnhancedInputPlugin);
     app.add_input_context::<Player>();
+
+    // Cursed controls
+    app.init_resource::<CursedControls>();
+    app.init_resource::<CursedAimState>();
+    app.add_systems(Update, toggle_cursed_controls);
+
+    // Input observer
     app.add_observer(apply_movement);
+
+    // Gameplay systems
     app.add_systems(FixedUpdate, enemy_chase_player.in_set(PausableSystems));
     app.add_systems(
         Update,
         (
             aim_spotlight,
+            update_reflected_spotlight, // mirror bounce (A + C)
             check_spotlight,
             on_spotlighted,
             on_un_spotlighted,
@@ -115,6 +128,111 @@ struct Health(f32);
 #[derive(Component)]
 struct Vox;
 
+#[derive(Component)]
+struct EnemySpotlight;
+
+#[derive(Component)]
+struct EnemyTorchSpotlight;
+
+// ==============================
+// Mirror bounce (A + C)
+// ==============================
+
+#[derive(Component)]
+struct Mirror {
+    /// Mirror normal in local space (rotate by the entity's rotation to get world normal).
+    local_normal: Vec3,
+}
+
+#[derive(Component)]
+struct ReflectedSpotlight;
+
+/// Mirror collision group for raycasts (so we only hit mirrors)
+const MIRROR_GROUP: Group = Group::GROUP_2;
+
+// ==============================
+// Cursed controls
+// ==============================
+
+#[derive(Resource, Debug)]
+pub struct CursedControls {
+    pub enabled: bool,
+
+    // Movement corruption
+    pub speed_mul: f32,
+    pub invert: Vec2,
+    pub skew: Vec2,
+    pub swirl_strength: f32,
+
+    // Aim corruption
+    pub aim_rotate_rad: f32,
+    pub aim_wobble_rad: f32,
+    pub aim_wobble_hz: f32,
+    pub aim_lag: f32,    // lower = more lag
+    pub aim_jitter: f32, // world-units jitter
+}
+
+impl Default for CursedControls {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            speed_mul: 1.8,
+            invert: Vec2::new(-1.0, 1.0),
+            skew: Vec2::new(0.65, -0.35),
+            swirl_strength: 0.35,
+            aim_rotate_rad: 0.9,
+            aim_wobble_rad: 0.35,
+            aim_wobble_hz: 1.7,
+            aim_lag: 0.12,
+            aim_jitter: 1.0,
+        }
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct CursedAimState {
+    /// Smoothed/lagged aim direction (horizontal).
+    pub current_dir: Vec3,
+}
+
+fn toggle_cursed_controls(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut cursed: ResMut<CursedControls>,
+    mut aim_state: ResMut<CursedAimState>,
+    mut rng: Single<&mut WyRand, With<GlobalRng>>,
+) {
+    if !keys.just_pressed(KeyCode::KeyQ) {
+        return;
+    }
+
+    cursed.enabled = !cursed.enabled;
+
+    if cursed.enabled {
+        cursed.speed_mul = rng.random_range(1.4..3.0);
+        cursed.invert = Vec2::new(
+            if rng.random_bool(0.5) { -1.0 } else { 1.0 },
+            if rng.random_bool(0.5) { -1.0 } else { 1.0 },
+        );
+        cursed.skew = Vec2::new(rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0));
+        cursed.swirl_strength = rng.random_range(0.15..0.75);
+
+        cursed.aim_rotate_rad = rng.random_range(-std::f32::consts::PI..std::f32::consts::PI);
+        cursed.aim_wobble_rad = rng.random_range(0.15..0.9);
+        cursed.aim_wobble_hz = rng.random_range(0.6..3.5);
+        cursed.aim_lag = rng.random_range(0.04..0.22);
+        cursed.aim_jitter = rng.random_range(0.3..2.5);
+
+        aim_state.current_dir = Vec3::ZERO;
+        info!("Cursed controls ENABLED: {:?}", *cursed);
+    } else {
+        info!("Cursed controls disabled.");
+    }
+}
+
+// ==============================
+// Spawning
+// ==============================
+
 pub fn spawn_game(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -122,6 +240,7 @@ pub fn spawn_game(
     mut rng: Single<&mut WyRand, With<GlobalRng>>,
     assets: Res<GameAssets>,
 ) {
+    // Ground
     commands.spawn((
         DespawnOnExit(Screen::Gameplay),
         Visibility::default(),
@@ -142,8 +261,113 @@ pub fn spawn_game(
             reflectance: 0.0,
             ..default()
         })),
-        Collider::cuboid(1000.0, 0., 1000.0),
+        Collider::cuboid(1000.0, 0.1, 1000.0),
+        RigidBody::Fixed,
     ));
+
+    // MIRROR (VERY visible)
+    // Put it close so you cannot miss it.
+    let mirror_half_extents = Vec3::new(1.5, 2.0, 0.06);
+    let mirror_size = mirror_half_extents * 2.0;
+
+    let mirror_mesh = meshes.add(Cuboid::new(mirror_size.x, mirror_size.y, mirror_size.z));
+    let frame_mesh = meshes.add(Cuboid::new(
+        mirror_size.x * 1.06,
+        mirror_size.y * 1.06,
+        mirror_size.z * 2.0,
+    ));
+
+    let mirror_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.25, 0.28, 0.35),
+        metallic: 1.0,
+        perceptual_roughness: 0.12,
+        reflectance: 1.0,
+        emissive: Color::srgb(0.12, 0.22, 0.55).into(),
+        ..default()
+    });
+
+    let frame_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.02, 0.02, 0.03),
+        emissive: Color::srgb(0.25, 0.55, 1.0).into(),
+        metallic: 0.0,
+        perceptual_roughness: 1.0,
+        ..default()
+    });
+
+    let mirror_pos = Vec3::new(15., mirror_half_extents.y, -5.0);
+    let mirror_rot = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+
+    commands.spawn((
+        Name::new("Mirror"),
+        DespawnOnExit(Screen::Gameplay),
+        Mirror {
+            local_normal: Vec3::Z,
+        },
+        Transform::from_translation(mirror_pos).with_rotation(mirror_rot),
+        GlobalTransform::default(),
+        Visibility::default(),
+        // physics / raycast target
+        RigidBody::Fixed,
+        Sensor,
+        Collider::cuboid(
+            mirror_half_extents.x,
+            mirror_half_extents.y,
+            mirror_half_extents.z,
+        ),
+        CollisionGroups::new(MIRROR_GROUP, Group::ALL),
+        // visuals + helper light
+        children![
+            (
+                Mesh3d(frame_mesh),
+                MeshMaterial3d(frame_mat),
+                Transform::default()
+            ),
+            (
+                Mesh3d(mirror_mesh),
+                MeshMaterial3d(mirror_mat),
+                Transform::default()
+            ),
+            (
+                PointLight {
+                    intensity: 2500.0,
+                    range: 12.0,
+                    color: LIGHT_COLOR,
+                    ..default()
+                },
+                Transform::from_xyz(0.0, 0.0, 0.8)
+            )
+        ],
+    ));
+
+    // Reflected spotlight (single entity, toggled visible when player light hits mirror)
+    commands.spawn((
+        Name::new("Reflected Spotlight"),
+        DespawnOnExit(Screen::Gameplay),
+        Transform::from_xyz(0.0, 0.0, 0.0),
+        Visibility::default(),
+        children![
+            (
+                ReflectedSpotlight,
+                SpotLight {
+                    color: MIRROR_COLOR,
+                    ..default()
+                },
+                Transform::from_xyz(0.0, 0.2, 0.0),
+                Visibility::Hidden,
+            ),
+            (
+                ReflectedSpotlight,
+                SpotLight {
+                    color: MIRROR_COLOR,
+                    ..default()
+                },
+                Transform::from_xyz(0.0, 2.0, 0.0),
+                Visibility::Hidden,
+            )
+        ],
+    ));
+
+    // Torch
     let torch_range = 4.0;
     commands.spawn((
         Name::new("Torch"),
@@ -157,7 +381,7 @@ pub fn spawn_game(
             (
                 Visibility::default(),
                 SceneRoot(assets.lamp.clone()),
-                Transform::from_scale(vec3(0.2, 0.2, 0.2))
+                Transform::from_scale(vec3(0.2, 0.2, 0.2)),
             ),
             (
                 Transform::from_xyz(0.0, 2.5, 0.0),
@@ -167,11 +391,12 @@ pub fn spawn_game(
                     range: torch_range + 3.,
                     radius: 4.,
                     ..default()
-                }
+                },
             )
         ],
     ));
 
+    // Player
     commands.spawn((
         Name::new("Player"),
         DespawnOnExit(Screen::Gameplay),
@@ -191,9 +416,7 @@ pub fn spawn_game(
         RigidBody::KinematicPositionBased,
         Collider::cuboid(0.5, 0.5, 0.5),
         Transform::from_translation(Vec3::new(0.0, 1.0, 0.0)),
-        KinematicCharacterController {
-            ..KinematicCharacterController::default()
-        },
+        KinematicCharacterController::default(),
         children![
             (
                 Name::new("Player Spotlight"),
@@ -223,26 +446,6 @@ pub fn spawn_game(
                 },
             ),
             (
-                Name::new("Player Spotlight2"),
-                DespawnOnExit(Screen::Gameplay),
-                Transform::from_xyz(0.0, 1., 0.0),
-                SpotLight {
-                    color: LIGHT_COLOR,
-                    outer_angle: 0.4,
-                    inner_angle: 0.3,
-                    range: 8.,
-                    intensity: 500000.0,
-                    ..default()
-                },
-            ),
-            (
-                DespawnOnExit(Screen::Gameplay),
-                Visibility::default(),
-                SceneRoot(assets.vox0.clone()),
-                Transform::from_scale(vec3(0.125, 0.06, 0.125))
-                    .with_translation(vec3(-0.9, -1., -0.5))
-            ),
-            (
                 Name::new("Player Down Spotlight"),
                 DespawnOnExit(Screen::Gameplay),
                 Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -254,12 +457,24 @@ pub fn spawn_game(
                     ..default()
                 },
             ),
+            (
+                Name::new("Player Vox"),
+                DespawnOnExit(Screen::Gameplay),
+                Visibility::default(),
+                SceneRoot(assets.vox0.clone()),
+                Vox,
+                Transform::from_scale(vec3(0.125, 0.06, 0.125))
+                    .with_translation(vec3(-0.9, -1., -0.5)),
+            ),
         ],
     ));
+
+    // Enemies
     for i in 0..30 {
         let x = rng.random_range(-50.0..50.0);
         let z = rng.random_range(-50.0..50.0);
         let speed_factor = rng.random_range(2.0..4.0);
+
         let vox = match rng.random_range(1..6) {
             1 => assets.vox1.clone(),
             2 => assets.vox2.clone(),
@@ -268,11 +483,12 @@ pub fn spawn_game(
             5 => assets.vox5.clone(),
             _ => unreachable!(),
         };
+
         commands.spawn((
             DespawnOnExit(Screen::Gameplay),
             Visibility::default(),
             Enemy,
-            Name::new(format!("Enemy {}", i)),
+            Name::new(format!("Enemy {i}")),
             RigidBody::Dynamic,
             Collider::cuboid(0.5, 0.5, 0.5),
             Transform::from_translation(vec3(x, 1., z)),
@@ -288,6 +504,7 @@ pub fn spawn_game(
             Health(100.),
             children![
                 (
+                    Name::new("Enemy Vox"),
                     DespawnOnExit(Screen::Gameplay),
                     Visibility::default(),
                     Transform::from_scale(vec3(0.125, 0.06, 0.125))
@@ -327,6 +544,10 @@ pub fn spawn_game(
     }
 }
 
+// ==============================
+// Spotlight/torch visual toggles
+// ==============================
+
 fn on_un_spotlighted(
     mut removed: RemovedComponents<Spotlighted>,
     enemies: Query<&Children>,
@@ -343,14 +564,11 @@ fn on_un_spotlighted(
     }
 }
 
-#[derive(Component)]
-struct EnemySpotlight;
-
 fn on_spotlighted(
     enemies: Query<&Children, (With<Enemy>, Added<Spotlighted>)>,
     mut enemy_spotlights: Query<&mut Visibility, With<EnemySpotlight>>,
 ) {
-    for children in enemies {
+    for children in &enemies {
         for &child in children {
             if let Ok(mut light) = enemy_spotlights.get_mut(child) {
                 *light = Visibility::Visible;
@@ -358,9 +576,6 @@ fn on_spotlighted(
         }
     }
 }
-
-#[derive(Component)]
-struct EnemyTorchSpotlight;
 
 fn on_un_torchlit(
     mut removed: RemovedComponents<Torchlit>,
@@ -382,7 +597,7 @@ fn on_torchlit(
     enemies: Query<&Children, (With<Enemy>, Added<Torchlit>)>,
     mut enemy_spotlights: Query<&mut Visibility, With<EnemyTorchSpotlight>>,
 ) {
-    for children in enemies {
+    for children in &enemies {
         for &child in children {
             if let Ok(mut light) = enemy_spotlights.get_mut(child) {
                 *light = Visibility::Visible;
@@ -391,66 +606,204 @@ fn on_torchlit(
     }
 }
 
+// ==============================
+// Player movement + cursed movement
+// ==============================
+
 fn apply_movement(
     movement: On<Fire<Movement>>,
     mut controller: Single<&mut KinematicCharacterController>,
     time: Res<Time>,
+    cursed: Res<CursedControls>,
 ) {
-    let speed = 10.0;
-    let input = movement.value;
+    let base_speed = 10.0;
+    let mut input = movement.value;
+
+    if cursed.enabled {
+        let x = (input.x * cursed.invert.x) + (input.y * cursed.skew.x);
+        let y = (input.y * cursed.invert.y) + (input.x * cursed.skew.y);
+
+        let t = time.elapsed_secs();
+        let swirl = Vec2::new((t * 2.3).sin(), (t * 1.9).cos()) * cursed.swirl_strength;
+
+        input = (Vec2::new(x, y) + swirl) * cursed.speed_mul;
+    }
 
     let forward = Vec3::new(-1.0, 0.0, -1.0).normalize();
     let right = Vec3::new(1.0, 0.0, -1.0).normalize();
 
+    // Intentionally not normalized: diagonals & cursed feel “oddly faster”
     let direction = forward * input.y + right * input.x;
 
-    controller.translation = Some(direction * speed * time.delta_secs());
+    controller.translation = Some(direction * base_speed * time.delta_secs());
 }
+
+// ==============================
+// Player aim + cursed aim
+// ==============================
 
 fn aim_spotlight(
     window: Single<&Window, With<PrimaryWindow>>,
     camera: Single<(&Camera, &GlobalTransform)>,
     mut player: Single<&mut Transform, With<Player>>,
+    time: Res<Time>,
+    cursed: Res<CursedControls>,
+    mut aim_state: ResMut<CursedAimState>,
+    mut rng: Single<&mut WyRand, With<GlobalRng>>,
 ) {
-    if let Some(cursor_pos) = window.cursor_position()
-        && let Ok(ray) = camera.0.viewport_to_world(camera.1, cursor_pos)
-    {
-        let ground_y = 0.0;
-        let denom = ray.direction.y;
-        if denom.abs() > 1e-6 {
-            let t = (ground_y - ray.origin.y) / denom;
-            if t >= 0.0 {
-                let mouse_ground = ray.origin + *ray.direction * t;
-                let player_pos = player.translation;
+    let Some(cursor_pos) = window.cursor_position() else {
+        return;
+    };
+    let Ok(ray) = camera.0.viewport_to_world(camera.1, cursor_pos) else {
+        return;
+    };
 
-                let direction = mouse_ground - player_pos;
-                let horizontal_direction =
-                    Vec3::new(direction.x, 0.0, direction.z).normalize_or_zero();
-                if horizontal_direction != Vec3::ZERO {
-                    player.look_to(horizontal_direction, Vec3::Y);
-                }
-            }
+    let denom = ray.direction.y;
+    if denom.abs() <= 1e-6 {
+        return;
+    }
+    let t = (0.0 - ray.origin.y) / denom;
+    if t < 0.0 {
+        return;
+    }
+
+    let mut target = ray.origin + *ray.direction * t;
+
+    if cursed.enabled {
+        let wobble = (time.elapsed_secs() * cursed.aim_wobble_hz * std::f32::consts::TAU).sin()
+            * cursed.aim_wobble_rad;
+        let angle = cursed.aim_rotate_rad + wobble;
+
+        let p = player.translation;
+        let v = target - p;
+        target = p + Quat::from_rotation_y(angle) * v;
+
+        if rng.random_bool(0.08) {
+            let jx = rng.random_range(-cursed.aim_jitter..cursed.aim_jitter);
+            let jz = rng.random_range(-cursed.aim_jitter..cursed.aim_jitter);
+            target += Vec3::new(jx, 0.0, jz);
         }
+    }
+
+    let player_pos = player.translation;
+    let mut dir = target - player_pos;
+    dir.y = 0.0;
+
+    let desired = dir.normalize_or_zero();
+    if desired == Vec3::ZERO {
+        return;
+    }
+
+    let final_dir = if cursed.enabled {
+        if aim_state.current_dir == Vec3::ZERO {
+            aim_state.current_dir = desired;
+        } else {
+            let alpha = (cursed.aim_lag * 60.0 * time.delta_secs()).clamp(0.01, 0.35);
+            aim_state.current_dir = aim_state
+                .current_dir
+                .lerp(desired, alpha)
+                .normalize_or_zero();
+        }
+        aim_state.current_dir
+    } else {
+        aim_state.current_dir = Vec3::ZERO;
+        desired
+    };
+
+    if final_dir != Vec3::ZERO {
+        player.look_to(final_dir, Vec3::Y);
     }
 }
 
+// ==============================
+// Mirror reflection update (A + C)
+// ==============================
+
+fn update_reflected_spotlight(
+    rapier_context: ReadRapierContext,
+
+    // READ player spotlight; must be disjoint from the reflected spotlight
+    player_light: Single<
+        (&GlobalTransform, &SpotLight),
+        (With<PlayerSpotlight>, Without<ReflectedSpotlight>),
+    >,
+
+    mirrors: Query<(&GlobalTransform, &Mirror)>,
+
+    // WRITE reflected spotlight; must be disjoint from the player spotlight
+    mut reflected_query: Query<
+        (&mut Transform, &mut SpotLight, &mut Visibility),
+        (With<ReflectedSpotlight>, Without<PlayerSpotlight>),
+    >,
+) {
+    let rapier = rapier_context.single().unwrap();
+
+    let (light_xform, light) = *player_light;
+    let origin = light_xform.translation();
+    let dir = light_xform.forward().normalize();
+
+    // Raycast ONLY against mirrors
+    let filter = QueryFilter::default().groups(CollisionGroups::new(Group::ALL, MIRROR_GROUP));
+    for (mut t, mut refl_light, mut vis) in reflected_query.iter_mut() {
+        let Some((hit_entity, toi)) = rapier.cast_ray(origin, dir, light.range, true, filter)
+        else {
+            *vis = Visibility::Hidden;
+            continue;
+        };
+
+        let Ok((mirror_xform, mirror)) = mirrors.get(hit_entity) else {
+            *vis = Visibility::Hidden;
+            continue;
+        };
+
+        let hit_point = origin + dir * toi;
+
+        let n = (mirror_xform.rotation() * mirror.local_normal).normalize();
+        let r = (dir - 2.0 * dir.dot(n) * n).normalize_or_zero();
+        if r == Vec3::ZERO {
+            *vis = Visibility::Hidden;
+            continue;
+        }
+
+        let spawn_pos = hit_point + r * 0.15;
+
+        t.translation = spawn_pos;
+        t.rotation = Quat::from_rotation_arc(Vec3::NEG_Z, r);
+
+        refl_light.inner_angle = light.inner_angle;
+        refl_light.outer_angle = light.outer_angle;
+        refl_light.range = light.range * 2.;
+        refl_light.intensity = light.intensity * 1.5;
+
+        *vis = Visibility::Visible;
+    }
+}
+
+// ==============================
+// Torch check (refactored: reuse allocations)
+// ==============================
+
 fn check_torch(
     mut commands: Commands,
-    enemies: Query<(Entity, &GlobalTransform, Ref<Transform>), With<Enemy>>,
+    enemies: Query<(Entity, &GlobalTransform), With<Enemy>>,
     torches: Query<(&GlobalTransform, &Torch)>,
+    mut hit_enemies: Local<HashSet<Entity>>,
 ) {
-    let mut hit_enemies = std::collections::HashSet::new();
-    for (torch_transform, torch) in torches {
-        for (entity, enemy_transform, _) in &enemies {
-            let d = torch_transform
-                .translation()
-                .distance(enemy_transform.translation());
-            if d <= torch.0 {
+    hit_enemies.clear();
+
+    for (torch_transform, torch) in &torches {
+        let torch_pos = torch_transform.translation();
+        let range = torch.0;
+
+        for (entity, enemy_transform) in &enemies {
+            let d = torch_pos.distance(enemy_transform.translation());
+            if d <= range {
                 hit_enemies.insert(entity);
             }
         }
     }
-    for (entity, _, _) in &enemies {
+
+    for (entity, _) in &enemies {
         if hit_enemies.contains(&entity) {
             commands.entity(entity).try_insert(Torchlit);
         } else {
@@ -459,28 +812,47 @@ fn check_torch(
     }
 }
 
+// ==============================
+// Spotlight check (includes reflected spotlight for gameplay)
+// ==============================
+
 fn check_spotlight(
     mut commands: Commands,
     rapier_context: ReadRapierContext,
     enemies: Query<(Entity, &GlobalTransform), With<Enemy>>,
-    spotlights: Query<(&GlobalTransform, &SpotLight), With<PlayerSpotlight>>,
+    spotlights: Query<
+        (&GlobalTransform, &SpotLight, &Visibility),
+        Or<(With<PlayerSpotlight>, With<ReflectedSpotlight>)>,
+    >,
+    mut hit_enemies: Local<HashSet<Entity>>,
+    mut cached_cone: Local<Option<(f32, f32, Collider)>>, // (range, outer_angle, collider)
 ) {
     let rapier_context = rapier_context.single().unwrap();
-    let mut hit_enemies = std::collections::HashSet::new();
-    for (spotlight_transform, spotlight) in spotlights {
+    hit_enemies.clear();
+
+    for (spotlight_transform, spotlight, vis) in &spotlights {
+        if matches!(*vis, Visibility::Hidden) {
+            continue;
+        }
+
+        let range = spotlight.range;
+        let outer = spotlight.outer_angle;
+
+        let shape = match cached_cone.as_ref() {
+            Some((r, o, c)) if (*r - range).abs() < 1e-6 && (*o - outer).abs() < 1e-6 => c,
+            _ => {
+                let cone_half_height = range / 2.0;
+                let cone_radius = range * outer.tan();
+                let cone = Collider::cone(cone_half_height, cone_radius);
+                *cached_cone = Some((range, outer, cone));
+                &cached_cone.as_ref().unwrap().2
+            }
+        };
+
         let ray_dir = spotlight_transform.forward().normalize();
-        // Create a cone collider for the spotlight area.
-        // half_height = how far the cone extends, radius = spread at the far end.
-        let cone_half_height = spotlight.range / 2.0;
-        //Use outer_angle to determine the radius
-        let cone_radius = spotlight.range * spotlight.outer_angle.tan();
-        let shape = Collider::cone(cone_half_height, cone_radius);
+        let cone_half_height = range / 2.0;
 
-        // Position the cone so its center is ahead of the player along the aim direction.
         let shape_pos = spotlight_transform.translation() + ray_dir * cone_half_height;
-
-        // Rotate so the cone's apex (default +Y) points back toward the player (-ray_dir),
-        // meaning the wide base fans out in the ray_dir direction.
         let shape_rot = Quat::from_rotation_arc(Vec3::Y, -ray_dir);
 
         let filter = QueryFilter::default().exclude_sensors();
@@ -494,10 +866,11 @@ fn check_spotlight(
                 if enemies.get(entity).is_ok() {
                     hit_enemies.insert(entity);
                 }
-                true // keep searching
+                true
             },
         );
     }
+
     for (entity, _) in &enemies {
         if hit_enemies.contains(&entity) {
             commands.entity(entity).try_insert(Spotlighted);
@@ -506,6 +879,10 @@ fn check_spotlight(
         }
     }
 }
+
+// ==============================
+// Enemy behavior
+// ==============================
 
 fn enemy_chase_player(
     player: Single<&Transform, (With<Player>, Without<Enemy>)>,
@@ -527,15 +904,15 @@ fn enemy_chase_player(
         &mut enemies
     {
         enemy_transform.look_at(player_pos, Vec3::Y);
+
         if is_spotlighted || is_torchlit {
             ext_force.force = Vec3::ZERO;
             continue;
         }
+
         let direction = (player_pos - enemy_transform.translation) * Vec3::new(1.0, 0.0, 1.0);
         if direction.length_squared() > 0.01 {
             let desired_vel = direction.normalize() * speed_factor.0;
-            // Apply a force that steers toward the desired velocity, allowing
-            // Rapier's collision solver to still push enemies apart.
             let force_strength = 20.0;
             ext_force.force = (desired_vel - velocity.linvel) * force_strength;
             ext_force.force.y = 0.0;
@@ -548,7 +925,7 @@ fn enemy_size(
     children2_query: Query<&Children>,
     mut vox: Query<&mut Transform, With<Vox>>,
 ) {
-    for (health, children) in enemies {
+    for (health, children) in enemies.iter() {
         let scale = 0.60 + (health.0 / 100.0) * 0.40;
         for child in children {
             if let Ok(children2) = children2_query.get(*child) {
@@ -564,16 +941,23 @@ fn enemy_size(
 
 fn enemy_health(
     mut commands: Commands,
-    enemies: Query<(Entity, &mut Health), (With<Enemy>, Or<(With<Spotlighted>, With<Torchlit>)>)>,
+    mut enemies: Query<
+        (Entity, &mut Health),
+        (With<Enemy>, Or<(With<Spotlighted>, With<Torchlit>)>),
+    >,
     time: Res<Time>,
 ) {
-    for (entity, mut health) in enemies {
+    for (entity, mut health) in enemies.iter_mut() {
         health.0 -= time.delta_secs() * 25.0;
         if health.0 <= 0.0 {
             commands.entity(entity).despawn();
         }
     }
 }
+
+// ==============================
+// Camera follow
+// ==============================
 
 fn camera_follow(
     player: Single<&Transform, (With<Player>, Changed<Transform>)>,
@@ -586,7 +970,6 @@ fn camera_follow(
     let (ref mut cam_transform, iso_cam) = *camera;
     let target_pos = player.translation + iso_cam.offset;
 
-    // Smooth follow — adjust the speed factor to taste (higher = snappier)
     let smoothness = 8.0;
     cam_transform.translation = cam_transform
         .translation
