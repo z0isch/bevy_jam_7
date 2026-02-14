@@ -9,6 +9,7 @@ mod crt_postprocess;
 mod dev_tools;
 mod game;
 mod menus;
+mod quotes;
 mod screens;
 mod theme;
 
@@ -19,7 +20,10 @@ use bevy_seedling::SeedlingPlugin;
 use bevy_sprite3d::prelude::*;
 use bevy_vox::VoxPlugin;
 
-use crate::crt_postprocess::{CrtPostProcessPlugin, CrtSettings};
+use crate::{
+    crt_postprocess::{CrtPostProcessPlugin, CrtSettings},
+    game::LIGHT_COLOR,
+};
 
 fn main() -> AppExit {
     App::new().add_plugins(AppPlugin).run()
@@ -109,7 +113,7 @@ fn spawn_camera(mut commands: Commands) {
             scanline_intensity: 0.3,
             scanline_count: 200.0,
             curvature: 0.05,
-            vignette_intensity: 1.,
+            vignette_intensity: 0.,
             chromatic_aberration: 0.01,
             brightness: 8.0,
             noise_intensity: 0.005,
@@ -117,7 +121,7 @@ fn spawn_camera(mut commands: Commands) {
         },
         IsometricCamera { offset },
         AmbientLight {
-            color: game::LIGHT_COLOR,
+            color: LIGHT_COLOR,
             brightness: 35.0,
             ..default()
         },
