@@ -11,7 +11,10 @@ use bevy_rand::{global::GlobalRng, prelude::WyRand};
 use bevy_rapier3d::prelude::*;
 use rand::Rng;
 
-use crate::{IsometricCamera, PausableSystems, asset_tracking::LoadResource, screens::Screen};
+use crate::{
+    IsometricCamera, PausableSystems, asset_tracking::LoadResource, crt_postprocess::CrtSettings,
+    screens::Screen,
+};
 
 pub const LIGHT_COLOR: Color = Color::srgb(1., 195. / 255., 0.0);
 pub const TORCH_COLOR: Color = Color::srgb(1.0, 90. / 255., 30. / 255.);
@@ -46,7 +49,11 @@ pub(super) fn plugin(app: &mut App) {
             on_un_torchlit,
             enemy_size,
             enemy_health,
+            player_health,
+            update_vignette,
+            enemy_spawner,
         )
+            .run_if(resource_exists::<GameAssets>)
             .in_set(PausableSystems),
     );
 }
@@ -237,7 +244,6 @@ pub fn spawn_game(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut rng: Single<&mut WyRand, With<GlobalRng>>,
     assets: Res<GameAssets>,
 ) {
     // Ground
@@ -267,77 +273,75 @@ pub fn spawn_game(
 
     // MIRROR (VERY visible)
     // Put it close so you cannot miss it.
-    let mirror_half_extents = Vec3::new(1.5, 2.0, 0.06);
-    let mirror_size = mirror_half_extents * 2.0;
+    // let mirror_half_extents = Vec3::new(1.5, 2.0, 0.06);
+    // let mirror_size = mirror_half_extents * 2.0;
 
-    let mirror_mesh = meshes.add(Cuboid::new(mirror_size.x, mirror_size.y, mirror_size.z));
-    let frame_mesh = meshes.add(Cuboid::new(
-        mirror_size.x * 1.06,
-        mirror_size.y * 1.06,
-        mirror_size.z * 2.0,
-    ));
+    // let mirror_mesh = meshes.add(Cuboid::new(mirror_size.x, mirror_size.y, mirror_size.z));
+    // let frame_mesh = meshes.add(Cuboid::new(
+    //     mirror_size.x * 1.06,
+    //     mirror_size.y * 1.06,
+    //     mirror_size.z * 2.0,
+    // ));
 
-    let mirror_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.25, 0.28, 0.35),
-        metallic: 1.0,
-        perceptual_roughness: 0.12,
-        reflectance: 1.0,
-        emissive: Color::srgb(0.12, 0.22, 0.55).into(),
-        ..default()
-    });
+    // let mirror_mat = materials.add(StandardMaterial {
+    //     base_color: Color::srgb(0.25, 0.28, 0.35),
+    //     metallic: 1.0,
+    //     perceptual_roughness: 0.12,
+    //     reflectance: 1.0,
+    //     emissive: Color::srgb(0.12, 0.22, 0.55).into(),
+    //     ..default()
+    // });
 
-    let frame_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.02, 0.02, 0.03),
-        emissive: Color::srgb(0.25, 0.55, 1.0).into(),
-        metallic: 0.0,
-        perceptual_roughness: 1.0,
-        ..default()
-    });
+    // let frame_mat = materials.add(StandardMaterial {
+    //     base_color: Color::srgb(0.02, 0.02, 0.03),
+    //     emissive: Color::srgb(0.25, 0.55, 1.0).into(),
+    //     metallic: 0.0,
+    //     perceptual_roughness: 1.0,
+    //     ..default()
+    // });
 
-    let mirror_pos = Vec3::new(15., mirror_half_extents.y, -5.0);
-    let mirror_rot = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+    // let mirror_pos = Vec3::new(15., mirror_half_extents.y, -5.0);
+    // let mirror_rot = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
 
-    commands.spawn((
-        Name::new("Mirror"),
-        DespawnOnExit(Screen::Gameplay),
-        Mirror {
-            local_normal: Vec3::Z,
-        },
-        Transform::from_translation(mirror_pos).with_rotation(mirror_rot),
-        GlobalTransform::default(),
-        Visibility::default(),
-        // physics / raycast target
-        RigidBody::Fixed,
-        Sensor,
-        Collider::cuboid(
-            mirror_half_extents.x,
-            mirror_half_extents.y,
-            mirror_half_extents.z,
-        ),
-        CollisionGroups::new(MIRROR_GROUP, Group::ALL),
-        // visuals + helper light
-        children![
-            (
-                Mesh3d(frame_mesh),
-                MeshMaterial3d(frame_mat),
-                Transform::default()
-            ),
-            (
-                Mesh3d(mirror_mesh),
-                MeshMaterial3d(mirror_mat),
-                Transform::default()
-            ),
-            (
-                PointLight {
-                    intensity: 2500.0,
-                    range: 12.0,
-                    color: LIGHT_COLOR,
-                    ..default()
-                },
-                Transform::from_xyz(0.0, 0.0, 0.8)
-            )
-        ],
-    ));
+    // commands.spawn((
+    //     Name::new("Mirror"),
+    //     DespawnOnExit(Screen::Gameplay),
+    //     Mirror {
+    //         local_normal: Vec3::Z,
+    //     },
+    //     Transform::from_translation(mirror_pos).with_rotation(mirror_rot),
+    //     GlobalTransform::default(),
+    //     Visibility::default(),
+    //     RigidBody::Fixed,
+    //     Collider::cuboid(
+    //         mirror_half_extents.x,
+    //         mirror_half_extents.y,
+    //         mirror_half_extents.z,
+    //     ),
+    //     CollisionGroups::new(MIRROR_GROUP, Group::ALL),
+    //     // visuals + helper light
+    //     children![
+    //         (
+    //             Mesh3d(frame_mesh),
+    //             MeshMaterial3d(frame_mat),
+    //             Transform::default()
+    //         ),
+    //         (
+    //             Mesh3d(mirror_mesh),
+    //             MeshMaterial3d(mirror_mat),
+    //             Transform::default()
+    //         ),
+    //         (
+    //             PointLight {
+    //                 intensity: 2500.0,
+    //                 range: 12.0,
+    //                 color: LIGHT_COLOR,
+    //                 ..default()
+    //             },
+    //             Transform::from_xyz(0.0, 0.0, 0.8)
+    //         )
+    //     ],
+    // ));
 
     // Reflected spotlight (single entity, toggled visible when player light hits mirror)
     commands.spawn((
@@ -368,38 +372,42 @@ pub fn spawn_game(
     ));
 
     // Torch
-    let torch_range = 4.0;
-    commands.spawn((
-        Name::new("Torch"),
-        DespawnOnExit(Screen::Gameplay),
-        Visibility::default(),
-        Transform::from_xyz(3.0, 0., 3.0),
-        Torch(torch_range),
-        RigidBody::Fixed,
-        Collider::cuboid(0.5, 0.5, 0.5),
-        children![
-            (
-                Visibility::default(),
-                SceneRoot(assets.lamp.clone()),
-                Transform::from_scale(vec3(0.2, 0.2, 0.2)),
-            ),
-            (
-                Transform::from_xyz(0.0, 2.5, 0.0),
-                PointLight {
-                    color: TORCH_COLOR,
-                    intensity: 100000.0,
-                    range: torch_range + 3.,
-                    radius: 4.,
-                    ..default()
-                },
-            )
-        ],
-    ));
+    // let torch_range = 4.;
+    // commands.spawn((
+    //     Name::new("Torch"),
+    //     DespawnOnExit(Screen::Gameplay),
+    //     Visibility::default(),
+    //     Transform::from_xyz(3.0, 0., 3.0),
+    //     Torch(torch_range),
+    //     RigidBody::Fixed,
+    //     Collider::cuboid(0.5, 0.5, 0.5),
+    //     children![
+    //         (
+    //             Visibility::default(),
+    //             SceneRoot(assets.lamp.clone()),
+    //             Transform::from_scale(vec3(0.2, 0.2, 0.2)),
+    //         ),
+    //         (
+    //             Transform::from_xyz(0.0, 2.5, 0.0),
+    //             PointLight {
+    //                 color: TORCH_COLOR,
+    //                 intensity: 100000.0,
+    //                 range: torch_range + 3.,
+    //                 radius: std::f32::consts::PI,
+    //                 ..default()
+    //             },
+    //         )
+    //     ],
+    // ));
 
     // Player
+    let flashlight_range = 6.0;
+    let flashlight_angle = 0.2;
     commands.spawn((
         Name::new("Player"),
         DespawnOnExit(Screen::Gameplay),
+        SpeedFactor(3.),
+        Health(100.),
         Player,
         actions!(Player[
             (
@@ -425,9 +433,9 @@ pub fn spawn_game(
                 Transform::from_xyz(0.0, -0.8, 0.0),
                 SpotLight {
                     color: LIGHT_COLOR,
-                    outer_angle: 0.4,
-                    inner_angle: 0.3,
-                    range: 8.,
+                    outer_angle: flashlight_angle,
+                    inner_angle: flashlight_angle - 0.1,
+                    range: flashlight_range,
                     intensity: 500000.0,
                     ..default()
                 },
@@ -438,9 +446,9 @@ pub fn spawn_game(
                 Transform::from_xyz(0.0, 2., 0.0),
                 SpotLight {
                     color: LIGHT_COLOR,
-                    outer_angle: 0.4,
-                    inner_angle: 0.3,
-                    range: 8.,
+                    outer_angle: flashlight_angle,
+                    inner_angle: flashlight_angle - 0.1,
+                    range: flashlight_range,
                     intensity: 500000.0,
                     ..default()
                 },
@@ -468,80 +476,6 @@ pub fn spawn_game(
             ),
         ],
     ));
-
-    // Enemies
-    for i in 0..30 {
-        let x = rng.random_range(-50.0..50.0);
-        let z = rng.random_range(-50.0..50.0);
-        let speed_factor = rng.random_range(2.0..4.0);
-
-        let vox = match rng.random_range(1..6) {
-            1 => assets.vox1.clone(),
-            2 => assets.vox2.clone(),
-            3 => assets.vox3.clone(),
-            4 => assets.vox4.clone(),
-            5 => assets.vox5.clone(),
-            _ => unreachable!(),
-        };
-
-        commands.spawn((
-            DespawnOnExit(Screen::Gameplay),
-            Visibility::default(),
-            Enemy,
-            Name::new(format!("Enemy {i}")),
-            RigidBody::Dynamic,
-            Collider::cuboid(0.5, 0.5, 0.5),
-            Transform::from_translation(vec3(x, 1., z)),
-            Velocity::default(),
-            ExternalForce::default(),
-            Damping {
-                linear_damping: 5.0,
-                angular_damping: 1.0,
-            },
-            LockedAxes::TRANSLATION_LOCKED_Y | LockedAxes::ROTATION_LOCKED,
-            Ccd::enabled(),
-            SpeedFactor(speed_factor),
-            Health(100.),
-            children![
-                (
-                    Name::new("Enemy Vox"),
-                    DespawnOnExit(Screen::Gameplay),
-                    Visibility::default(),
-                    Transform::from_scale(vec3(0.125, 0.06, 0.125))
-                        .with_translation(vec3(-1., -1., -0.5)),
-                    children![(SceneRoot(vox), Vox, Transform::default())]
-                ),
-                (
-                    Name::new("Enemy Down Spotlight"),
-                    DespawnOnExit(Screen::Gameplay),
-                    EnemySpotlight,
-                    Visibility::Hidden,
-                    Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
-                    SpotLight {
-                        color: LIGHT_COLOR,
-                        outer_angle: 1.,
-                        range: 8.,
-                        intensity: 100000.0,
-                        ..default()
-                    },
-                ),
-                (
-                    Name::new("Enemy Torchlit Spotlight"),
-                    DespawnOnExit(Screen::Gameplay),
-                    EnemyTorchSpotlight,
-                    Visibility::Hidden,
-                    Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
-                    SpotLight {
-                        color: TORCH_COLOR,
-                        outer_angle: 1.,
-                        range: 8.,
-                        intensity: 100000.0,
-                        ..default()
-                    },
-                )
-            ],
-        ));
-    }
 }
 
 // ==============================
@@ -613,10 +547,10 @@ fn on_torchlit(
 fn apply_movement(
     movement: On<Fire<Movement>>,
     mut controller: Single<&mut KinematicCharacterController>,
+    player_speed: Single<&SpeedFactor, With<Player>>,
     time: Res<Time>,
     cursed: Res<CursedControls>,
 ) {
-    let base_speed = 10.0;
     let mut input = movement.value;
 
     if cursed.enabled {
@@ -635,7 +569,7 @@ fn apply_movement(
     // Intentionally not normalized: diagonals & cursed feel “oddly faster”
     let direction = forward * input.y + right * input.x;
 
-    controller.translation = Some(direction * base_speed * time.delta_secs());
+    controller.translation = Some(direction * player_speed.0 * time.delta_secs());
 }
 
 // ==============================
@@ -920,13 +854,21 @@ fn enemy_chase_player(
     }
 }
 
+fn calc_size(health: f32) -> f32 {
+    let t = (health / 100.0).clamp(0.0, 1.0);
+    let min_size: f32 = 0.3;
+    let max_size: f32 = 1.;
+    // Use a square root curve allowing enemies to be larger at low health
+    min_size + (max_size - min_size) * t.sqrt()
+}
+
 fn enemy_size(
     enemies: Query<(&Health, &Children), (With<Enemy>, Changed<Health>)>,
     children2_query: Query<&Children>,
     mut vox: Query<&mut Transform, With<Vox>>,
 ) {
     for (health, children) in enemies.iter() {
-        let scale = 0.60 + (health.0 / 100.0) * 0.40;
+        let scale = calc_size(health.0);
         for child in children {
             if let Ok(children2) = children2_query.get(*child) {
                 for child2 in children2 {
@@ -955,6 +897,33 @@ fn enemy_health(
     }
 }
 
+fn player_health(
+    mut player: Single<(&Transform, &mut Health), With<Player>>,
+    enemies: Query<&Transform, (With<Enemy>, Without<Player>)>,
+    time: Res<Time>,
+) {
+    for enemy_transform in enemies {
+        let distance = player.0.translation.distance(enemy_transform.translation);
+        if distance < 8.0 {
+            let t = 1.0 - (distance / 8.0);
+            let damage_factor = 25.0 * t.powi(2);
+            player.1.0 -= time.delta_secs() * damage_factor;
+            player.1.0 = player.1.0.max(0.0);
+        }
+    }
+}
+
+fn update_vignette(player: Single<&Health, With<Player>>, mut camera: Single<&mut CrtSettings>) {
+    let health = (player.0 / 100.0).clamp(0.0, 1.0);
+    // Scale from 0.5 -> 10 as health goes from 100 -> 0 but ramp towards 10 as we get closer to 0 health
+    camera.vignette_intensity = 0.5 + 10.0 * (1.0 - health).powi(2);
+    if player.0 <= 0. {
+        camera.brightness = 0.;
+    } else {
+        camera.brightness = 6.0 - 5.0 * (1.0 - health).powi(2);
+    }
+}
+
 // ==============================
 // Camera follow
 // ==============================
@@ -974,4 +943,106 @@ fn camera_follow(
     cam_transform.translation = cam_transform
         .translation
         .lerp(target_pos, smoothness * time.delta_secs());
+}
+
+fn enemy_spawner(
+    mut commands: Commands,
+    mut rng: Single<&mut WyRand, With<GlobalRng>>,
+    assets: Res<GameAssets>,
+    enemies: Query<Entity, With<Enemy>>,
+    player: Single<&Transform, With<Player>>,
+    time: Res<Time>,
+    mut local_seconds: Local<f32>,
+) {
+    *local_seconds += time.delta_secs();
+
+    let total_enemies = 10 + (*local_seconds / 5.).floor() as usize;
+    let enemies_to_spawn = total_enemies - enemies.count();
+
+    for _ in 0..enemies_to_spawn.max(0) {
+        let max_health = 10. + *local_seconds;
+        let health = rng.random_range(5.0..max_health);
+        let scale = calc_size(health);
+        // Spawn behind the player
+        let back = player.rotation * Vec3::Z;
+        let base_angle = back.z.atan2(back.x);
+        let spread = std::f32::consts::PI;
+        let theta = base_angle + rng.random_range(-spread..spread);
+
+        let radius = rng.random_range(12.0..20.0);
+        let x = player.translation.x + radius * theta.cos();
+        let z = player.translation.z + radius * theta.sin();
+        let speed_factor = rng.random_range(1.0..4.0);
+
+        let vox = match rng.random_range(1..6) {
+            1 => assets.vox1.clone(),
+            2 => assets.vox2.clone(),
+            3 => assets.vox3.clone(),
+            4 => assets.vox4.clone(),
+            5 => assets.vox5.clone(),
+            _ => unreachable!(),
+        };
+
+        commands.spawn((
+            DespawnOnExit(Screen::Gameplay),
+            Visibility::default(),
+            Enemy,
+            Name::new("Enemy"),
+            RigidBody::Dynamic,
+            Collider::cuboid(0.5, 0.5, 0.5),
+            Transform::from_translation(vec3(x, 1., z)),
+            Velocity::default(),
+            ExternalForce::default(),
+            Damping {
+                linear_damping: 5.0,
+                angular_damping: 1.0,
+            },
+            LockedAxes::TRANSLATION_LOCKED_Y | LockedAxes::ROTATION_LOCKED,
+            Ccd::enabled(),
+            SpeedFactor(speed_factor),
+            Health(health),
+            children![
+                (
+                    Name::new("Enemy Vox"),
+                    DespawnOnExit(Screen::Gameplay),
+                    Visibility::default(),
+                    Transform::from_scale(vec3(
+                        0.125 * 2. * scale,
+                        0.06 * 2. * scale,
+                        0.125 * 2. * scale
+                    ))
+                    .with_translation(vec3(-1., -1., -0.5)),
+                    children![(SceneRoot(vox), Vox, Transform::default())]
+                ),
+                (
+                    Name::new("Enemy Down Spotlight"),
+                    DespawnOnExit(Screen::Gameplay),
+                    EnemySpotlight,
+                    Visibility::Hidden,
+                    Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+                    SpotLight {
+                        color: LIGHT_COLOR,
+                        outer_angle: 1.,
+                        range: 8.,
+                        intensity: 100000.0,
+                        ..default()
+                    },
+                ),
+                (
+                    Name::new("Enemy Torchlit Spotlight"),
+                    DespawnOnExit(Screen::Gameplay),
+                    EnemyTorchSpotlight,
+                    Visibility::Hidden,
+                    Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+                    SpotLight {
+                        color: TORCH_COLOR,
+                        outer_angle: 1.,
+                        range: 8.,
+                        intensity: 100000.0,
+                        ..default()
+                    },
+                )
+            ],
+        ));
+    }
 }
