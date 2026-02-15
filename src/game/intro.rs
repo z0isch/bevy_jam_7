@@ -5,6 +5,7 @@ use rand::Rng;
 use crate::{
     game::{GameState, GameStateMachine},
     quotes::QUOTES,
+    screens::Screen,
     theme::widget,
 };
 
@@ -23,8 +24,9 @@ fn spawn_intro(
         widget::ui_root("Main Menu"),
         GlobalZIndex(1),
         DespawnOnExit(GameStateMachine::Intro),
+        DespawnOnExit(Screen::Gameplay),
         children![
-            widget::header(format!("Dream #{:}", game_state.dream_number)),
+            widget::header(format!("Night #{:}", game_state.night_number)),
             widget::label(quote),
             widget::label(author),
             widget::button("Start", go_to_level),

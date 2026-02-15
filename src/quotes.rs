@@ -1,4 +1,4 @@
-pub const QUOTES: [[&str; 2]; 18] = [
+pub const QUOTES: [[&str; 2]; 20] = [
     [
         "By the pricking of my thumbs, something wicked this way comes.",
         "- William Shakespeare, Macbeth",
@@ -16,20 +16,16 @@ pub const QUOTES: [[&str; 2]; 18] = [
         "- George R. R. Martin, A Clash of Kings",
     ],
     [
-        "The oldest and strongest emotion of mankind is fear.",
-        "- H. P. Lovecraft",
-    ],
-    [
         "And darkness and decay and the Red Death held illimitable dominion over all.",
         "- Edgar Allan Poe, The Masque of the Red Death",
     ],
     [
         "I see dead people.",
-        "- The Sixth Sense, written by M. Night Shyamalan",
+        "-  M. Night Shyamalan, The Sixth Sense",
     ],
     [
         "We have such sights to show you.",
-        "- Hellraiser, written by Clive Barker",
+        "- Clive Barker, Hellraiser",
     ],
     [
         "Monsters are real, and ghosts are real too. They live inside us, and sometimes, they win.",
@@ -43,10 +39,6 @@ pub const QUOTES: [[&str; 2]; 18] = [
     [
         "Abandon all hope, ye who enter here.",
         "- Dante Alighieri, Inferno",
-    ],
-    [
-        "The call of Cthulhu is not to be described.",
-        "- H. P. Lovecraft, The Call of Cthulhu",
     ],
     [
         "There are things that go bump in the night.",
@@ -65,4 +57,14 @@ pub const QUOTES: [[&str; 2]; 18] = [
         "- John Milton, Paradise Lost",
     ],
     ["Out, out, brief candle!", "- William Shakespeare, Macbeth"],
+    ["Be afraid. Be very afraid.", "- The Fly"],
+    ["We all go a little mad sometimes.", "- Alfred Hitchcock"],
+    [
+        "All that we see or seem is but a dream within a dream.",
+        "- Edgar Allan Poe",
+    ],
+    [
+        "What a horrible night to have a curse.",
+        "- Castlevania II: Simon's Quest",
+    ],
 ];

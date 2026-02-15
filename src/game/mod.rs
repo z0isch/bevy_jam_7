@@ -1,3 +1,4 @@
+mod hud;
 mod intro;
 mod level;
 mod shop;
@@ -22,16 +23,25 @@ pub enum GameStateMachine {
 
 #[derive(Resource, Debug, Reflect)]
 pub struct GameState {
-    dream_number: usize,
+    night_number: usize,
+    kills_this_night: usize,
+    survived_seconds_this_night: f32,
+    total_kills: usize,
 }
 
 pub(super) fn plugin(app: &mut App) {
     app.init_state::<GameStateMachine>();
-    app.insert_resource(GameState { dream_number: 1 });
+    app.insert_resource(GameState {
+        night_number: 1,
+        kills_this_night: 0,
+        survived_seconds_this_night: 0.0,
+        total_kills: 0,
+    });
     app.load_resource::<GameAssets>();
     app.add_plugins(intro::plugin);
     app.add_plugins(shop::plugin);
     app.add_plugins(level::plugin);
+    app.add_plugins(hud::plugin);
 }
 
 pub fn start(mut state: ResMut<NextState<GameStateMachine>>) {

@@ -10,7 +10,7 @@ use rand::Rng;
 use crate::{
     IsometricCamera, PausableSystems,
     crt_postprocess::CrtSettings,
-    game::{GameAssets, GameStateMachine, LIGHT_COLOR},
+    game::{GameAssets, GameState, GameStateMachine, LIGHT_COLOR},
     screens::Screen,
 };
 
@@ -33,24 +33,29 @@ pub(super) fn plugin(app: &mut App) {
     app.add_systems(
         Update,
         (
-            toggle_cursed_controls,
-            enemy_chase_player,
-            aim_spotlight,
-            update_reflected_spotlight, // mirror bounce (A + C)
-            check_spotlight,
-            on_spotlighted,
-            on_un_spotlighted,
-            camera_follow,
-            check_torch,
-            on_torchlit,
-            on_un_torchlit,
-            enemy_size,
-            enemy_health,
-            player_health,
-            update_vignette,
-            enemy_spawner,
+            tick_player_time,
+            (
+                toggle_cursed_controls,
+                enemy_chase_player,
+                aim_spotlight,
+                update_reflected_spotlight, // mirror bounce (A + C)
+                check_spotlight,
+                on_spotlighted,
+                on_un_spotlighted,
+                camera_follow,
+                check_torch,
+                on_torchlit,
+                on_un_torchlit,
+                enemy_size,
+                enemy_health,
+                player_health,
+                update_vignette,
+                enemy_spawner,
+            ),
         )
+            .chain()
             .run_if(resource_exists::<GameAssets>)
+            .run_if(in_state(GameStateMachine::Level))
             .in_set(PausableSystems),
     );
 }
@@ -846,25 +851,28 @@ fn enemy_health(
         (With<Enemy>, Or<(With<Spotlighted>, With<Torchlit>)>),
     >,
     time: Res<Time>,
+    mut game_state: ResMut<GameState>,
 ) {
     for (entity, mut health) in enemies.iter_mut() {
         health.0 -= time.delta_secs() * 25.0;
         if health.0 <= 0.0 {
+            game_state.kills_this_night += 1;
+            game_state.total_kills += 1;
             commands.entity(entity).despawn();
         }
     }
 }
 
 fn player_health(
-    mut player: Single<(&Transform, &mut Health), With<Player>>,
+    mut player: Single<(&Transform, &mut Health, &Player)>,
     enemies: Query<&Transform, (With<Enemy>, Without<Player>)>,
     time: Res<Time>,
     mut game_state: ResMut<NextState<GameStateMachine>>,
 ) {
     for enemy_transform in enemies {
         let distance = player.0.translation.distance(enemy_transform.translation);
-        if distance < 8.0 {
-            let t = 1.0 - (distance / 8.0);
+        if distance < 6.0 {
+            let t = 1.0 - (distance / 6.0);
             let damage_factor = 25.0 * t.powi(2);
             player.1.0 -= time.delta_secs() * damage_factor;
             player.1.0 = player.1.0.max(0.0);
@@ -912,106 +920,132 @@ fn enemy_spawner(
     mut rng: Single<&mut WyRand, With<GlobalRng>>,
     assets: Res<GameAssets>,
     enemies: Query<Entity, With<Enemy>>,
-    player: Single<&Transform, With<Player>>,
-    time: Res<Time>,
-    mut local_seconds: Local<f32>,
+    player_transform: Single<&Transform, With<Player>>,
+    game_state: Res<GameState>,
 ) {
-    *local_seconds += time.delta_secs();
+    if game_state.night_number == 1 && game_state.kills_this_night == 0 {
+        if enemies.is_empty() {
+            spawn_enemy(
+                &mut commands,
+                -10.0,
+                -10.0,
+                assets.vox5.clone(),
+                3.0,
+                60.0,
+                0.6,
+            );
+        }
+    } else {
+        let total_enemies = 10 + (game_state.survived_seconds_this_night / 5.0).floor() as usize;
+        let enemies_to_spawn = total_enemies - enemies.count();
 
-    let total_enemies = 10 + (*local_seconds / 5.).floor() as usize;
-    let enemies_to_spawn = total_enemies - enemies.count();
+        for _ in 0..enemies_to_spawn.max(0) {
+            let max_health = 10. + (game_state.survived_seconds_this_night / 5.0);
+            let health = rng.random_range(5.0..max_health);
+            let scale = calc_size(health);
+            // Spawn behind the player
+            let back = player_transform.rotation * Vec3::Z;
+            let base_angle = back.z.atan2(back.x);
+            let spread = std::f32::consts::PI;
+            let theta = base_angle + rng.random_range(-spread..spread);
 
-    for _ in 0..enemies_to_spawn.max(0) {
-        let max_health = 10. + *local_seconds;
-        let health = rng.random_range(5.0..max_health);
-        let scale = calc_size(health);
-        // Spawn behind the player
-        let back = player.rotation * Vec3::Z;
-        let base_angle = back.z.atan2(back.x);
-        let spread = std::f32::consts::PI;
-        let theta = base_angle + rng.random_range(-spread..spread);
+            let radius = rng.random_range(12.0..20.0);
+            let x = player_transform.translation.x + radius * theta.cos();
+            let z = player_transform.translation.z + radius * theta.sin();
+            let speed_factor = rng.random_range(1.0..4.0);
 
-        let radius = rng.random_range(12.0..20.0);
-        let x = player.translation.x + radius * theta.cos();
-        let z = player.translation.z + radius * theta.sin();
-        let speed_factor = rng.random_range(1.0..4.0);
-
-        let vox = match rng.random_range(1..6) {
-            1 => assets.vox1.clone(),
-            2 => assets.vox2.clone(),
-            3 => assets.vox3.clone(),
-            4 => assets.vox4.clone(),
-            5 => assets.vox5.clone(),
-            _ => unreachable!(),
-        };
-
-        commands
-            .spawn((
-                Visibility::default(),
-                Enemy,
-                Name::new("Enemy"),
-                RigidBody::Dynamic,
-                Collider::cuboid(0.5, 0.5, 0.5),
-                Transform::from_translation(vec3(x, 1., z)),
-                Velocity::default(),
-                ExternalForce::default(),
-                Damping {
-                    linear_damping: 5.0,
-                    angular_damping: 1.0,
-                },
-                LockedAxes::TRANSLATION_LOCKED_Y | LockedAxes::ROTATION_LOCKED,
-                Ccd::enabled(),
-                SpeedFactor(speed_factor),
-                Health(health),
-                children![
-                    (
-                        Name::new("Enemy Vox"),
-                        DespawnOnExit(GameStateMachine::Level),
-                        DespawnOnExit(Screen::Gameplay),
-                        Visibility::default(),
-                        Transform::from_scale(vec3(
-                            0.125 * 2. * scale,
-                            0.06 * 2. * scale,
-                            0.125 * 2. * scale
-                        ))
-                        .with_translation(vec3(-1., -1., -0.5)),
-                        children![(SceneRoot(vox), Vox, Transform::default())]
-                    ),
-                    (
-                        Name::new("Enemy Down Spotlight"),
-                        DespawnOnExit(GameStateMachine::Level),
-                        DespawnOnExit(Screen::Gameplay),
-                        EnemySpotlight,
-                        Visibility::Hidden,
-                        Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
-                        SpotLight {
-                            color: LIGHT_COLOR,
-                            outer_angle: 1.,
-                            range: 8.,
-                            intensity: 100000.0,
-                            ..default()
-                        },
-                    ),
-                    (
-                        Name::new("Enemy Torchlit Spotlight"),
-                        DespawnOnExit(GameStateMachine::Level),
-                        DespawnOnExit(Screen::Gameplay),
-                        EnemyTorchSpotlight,
-                        Visibility::Hidden,
-                        Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
-                        SpotLight {
-                            color: TORCH_COLOR,
-                            outer_angle: 1.,
-                            range: 8.,
-                            intensity: 100000.0,
-                            ..default()
-                        },
-                    )
-                ],
-            ))
-            .insert((
-                DespawnOnExit(Screen::Gameplay),
-                DespawnOnExit(GameStateMachine::Level),
-            ));
+            let vox = match rng.random_range(1..6) {
+                1 => assets.vox1.clone(),
+                2 => assets.vox2.clone(),
+                3 => assets.vox3.clone(),
+                4 => assets.vox4.clone(),
+                5 => assets.vox5.clone(),
+                _ => unreachable!(),
+            };
+            spawn_enemy(&mut commands, x, z, vox, speed_factor, health, scale);
+        }
     }
+}
+
+fn tick_player_time(mut game_state: ResMut<GameState>, time: Res<Time>) {
+    game_state.survived_seconds_this_night += time.delta_secs();
+}
+
+fn spawn_enemy(
+    commands: &mut Commands,
+    x: f32,
+    z: f32,
+    vox: Handle<Scene>,
+    speed_factor: f32,
+    health: f32,
+    scale: f32,
+) {
+    commands
+        .spawn((
+            Visibility::default(),
+            Enemy,
+            Name::new("Enemy"),
+            RigidBody::Dynamic,
+            Collider::cuboid(0.5, 0.5, 0.5),
+            Transform::from_translation(vec3(x, 1., z)),
+            Velocity::default(),
+            ExternalForce::default(),
+            Damping {
+                linear_damping: 5.0,
+                angular_damping: 1.0,
+            },
+            LockedAxes::TRANSLATION_LOCKED_Y | LockedAxes::ROTATION_LOCKED,
+            Ccd::enabled(),
+            SpeedFactor(speed_factor),
+            Health(health),
+            children![
+                (
+                    Name::new("Enemy Vox"),
+                    DespawnOnExit(GameStateMachine::Level),
+                    DespawnOnExit(Screen::Gameplay),
+                    Visibility::default(),
+                    Transform::from_scale(vec3(
+                        0.125 * 2. * scale,
+                        0.06 * 2. * scale,
+                        0.125 * 2. * scale
+                    ))
+                    .with_translation(vec3(-1., -1., -0.5)),
+                    children![(SceneRoot(vox), Vox, Transform::default())]
+                ),
+                (
+                    Name::new("Enemy Down Spotlight"),
+                    DespawnOnExit(GameStateMachine::Level),
+                    DespawnOnExit(Screen::Gameplay),
+                    EnemySpotlight,
+                    Visibility::Hidden,
+                    Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+                    SpotLight {
+                        color: LIGHT_COLOR,
+                        outer_angle: 1.,
+                        range: 8.,
+                        intensity: 100000.0,
+                        ..default()
+                    },
+                ),
+                (
+                    Name::new("Enemy Torchlit Spotlight"),
+                    DespawnOnExit(GameStateMachine::Level),
+                    DespawnOnExit(Screen::Gameplay),
+                    EnemyTorchSpotlight,
+                    Visibility::Hidden,
+                    Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+                    SpotLight {
+                        color: TORCH_COLOR,
+                        outer_angle: 1.,
+                        range: 8.,
+                        intensity: 100000.0,
+                        ..default()
+                    },
+                )
+            ],
+        ))
+        .insert((
+            DespawnOnExit(Screen::Gameplay),
+            DespawnOnExit(GameStateMachine::Level),
+        ));
 }
