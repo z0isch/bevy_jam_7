@@ -19,8 +19,8 @@ fn spawn_dead(mut commands: Commands, game_state: ResMut<GameState>) {
         DespawnOnExit(GameStateMachine::Dead),
         DespawnOnExit(Screen::Gameplay),
         children![
-            widget::header("You didn't survive the night!"),
-            widget::label("See if you can survive longer next time."),
+            widget::header("You didn't survive!"),
+            widget::label("Can you last until sunrise (2.5 minutes)?"),
             widget::label(""),
             widget::label(format!("Kills: {}", game_state.kills_this_night)),
             widget::label(format!(

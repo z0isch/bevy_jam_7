@@ -18,8 +18,6 @@ fn spawn_credits_menu(mut commands: Commands) {
         GlobalZIndex(2),
         DespawnOnExit(Menu::Credits),
         children![
-            widget::header("Created by"),
-            created_by(),
             widget::header("Assets"),
             assets(),
             widget::button("Back", go_back_on_click),
@@ -27,23 +25,8 @@ fn spawn_credits_menu(mut commands: Commands) {
     ));
 }
 
-fn created_by() -> impl Bundle {
-    grid(vec![
-        ["Joe Shmoe", "Implemented alligator wrestling AI"],
-        ["Jane Doe", "Made the music for the alien invasion"],
-    ])
-}
-
 fn assets() -> impl Bundle {
-    grid(vec![
-        ["Ducky sprite", "CC0 by Caz Creates Games"],
-        ["Button SFX", "CC0 by Jaszunio15"],
-        ["Music", "CC BY 3.0 by Kevin MacLeod"],
-        [
-            "Bevy logo",
-            "All rights reserved by the Bevy Foundation, permission granted for splash screen use when unmodified",
-        ],
-    ])
+    grid(vec![["Voxel Zombies", "Max Parata"]])
 }
 
 fn grid(content: Vec<[&'static str; 2]>) -> impl Bundle {

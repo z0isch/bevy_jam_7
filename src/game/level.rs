@@ -1032,7 +1032,7 @@ fn enemy_spawner(
         if enemies.is_empty() {
             spawn_enemy(&mut commands, -10.0, -10.0, assets.vox5.clone(), 3.0, 60.0);
         }
-    } else if game_state.survived_seconds_this_night >= 180.0 {
+    } else if game_state.survived_seconds_this_night >= 150.0 {
         if enemies.iter().any(|(_, has_boss)| has_boss) {
             return;
         }
