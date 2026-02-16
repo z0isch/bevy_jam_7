@@ -5,6 +5,7 @@ use bevy_enhanced_input::prelude::*;
 use bevy_mesh::VertexAttributeValues;
 use bevy_rand::{global::GlobalRng, prelude::WyRand};
 use bevy_rapier3d::prelude::*;
+use bevy_seedling::sample::SamplePlayer;
 use rand::Rng;
 
 use crate::{
@@ -948,6 +949,7 @@ fn enemy_health(
         (With<Enemy>, Or<(With<Spotlighted>, With<Torchlit>)>),
     >,
     time: Res<Time>,
+    game_assets: Res<GameAssets>,
     mut next_state: ResMut<NextState<GameStateMachine>>,
     mut game_state: ResMut<GameState>,
 ) {
@@ -958,6 +960,7 @@ fn enemy_health(
             health.0 -= time.delta_secs() * 25.0;
         }
         if health.0 <= 0.0 {
+            commands.spawn(SamplePlayer::new(game_assets.pop_sound.clone()));
             game_state.kills_this_night += 1;
             game_state.total_kills += 1;
             if is_boss {
@@ -1124,7 +1127,7 @@ fn spawn_boss(commands: &mut Commands, assets: &GameAssets) {
             },
             LockedAxes::TRANSLATION_LOCKED_Y | LockedAxes::ROTATION_LOCKED,
             Ccd::enabled(),
-            SpeedFactor(1.5),
+            SpeedFactor(0.5),
             Health(100.),
             children![
                 (

@@ -10,6 +10,7 @@ use bevy::{
     prelude::*,
 };
 use bevy_rand::prelude::*;
+use bevy_seedling::sample::AudioSample;
 use rand::seq::SliceRandom;
 
 use crate::{asset_tracking::LoadResource, quotes::QUOTES};
@@ -114,6 +115,8 @@ pub struct GameAssets {
     vox5: Handle<Scene>,
     #[dependency]
     lamp: Handle<Scene>,
+    #[dependency]
+    pop_sound: Handle<AudioSample>,
 }
 
 impl FromWorld for GameAssets {
@@ -137,6 +140,7 @@ impl FromWorld for GameAssets {
             vox4: assets.load("vox/Zeds-4-Zed_5.vox"),
             vox5: assets.load("vox/Zeds-5-Zed_6.vox"),
             lamp: assets.load("vox/Lamp.vox"),
+            pop_sound: assets.load("audio/sound_effects/pop.ogg"),
         }
     }
 }
