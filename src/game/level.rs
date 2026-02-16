@@ -33,7 +33,7 @@ pub(super) fn plugin(app: &mut App) {
     app.add_systems(
         Update,
         (
-            tick_player_time,
+            (tick_player_time, tick_torch_timers),
             (
                 toggle_cursed_controls,
                 enemy_chase_player,
@@ -51,6 +51,7 @@ pub(super) fn plugin(app: &mut App) {
                 player_health,
                 update_vignette,
                 enemy_spawner,
+                torch_on_off,
             ),
         )
             .chain()
@@ -80,7 +81,12 @@ struct Spotlighted;
 struct SpeedFactor(f32);
 
 #[derive(Component, Reflect)]
-struct Torch(f32);
+struct Torch {
+    range: f32,
+    on_timer: Timer,
+    off_timer: Timer,
+    is_on: bool,
+}
 
 #[derive(Component)]
 struct Torchlit;
@@ -110,8 +116,15 @@ struct Mirror {
 #[derive(Component)]
 struct ReflectedSpotlight;
 
+#[derive(Component)]
+struct Boss;
+
 /// Mirror collision group for raycasts (so we only hit mirrors)
+const PLAYER_GROUP: Group = Group::GROUP_1;
 const MIRROR_GROUP: Group = Group::GROUP_2;
+const ENEMY_GROUP: Group = Group::GROUP_3;
+const WALL_GROUP: Group = Group::GROUP_4;
+const GROUND_GROUP: Group = Group::GROUP_5;
 
 // ==============================
 // Cursed controls
@@ -201,6 +214,7 @@ pub fn spawn_level(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     assets: Res<GameAssets>,
+    game_state: Res<GameState>,
 ) {
     // Ground
     commands.spawn((
@@ -226,6 +240,77 @@ pub fn spawn_level(
         })),
         Collider::cuboid(1000.0, 0.1, 1000.0),
         RigidBody::Fixed,
+        CollisionGroups::new(GROUND_GROUP, Group::ALL),
+    ));
+
+    // Walls
+    let wall_size = 50.0;
+    let wall_height = 2.0;
+    let wall_thickness = 0.1;
+    let wall_color = Color::srgb(0.1, 0.1, 0.1);
+
+    // North
+    commands.spawn((
+        Name::new("Wall North"),
+        DespawnOnExit(GameStateMachine::Level),
+        DespawnOnExit(Screen::Gameplay),
+        Mesh3d(meshes.add(Cuboid::new(wall_size, wall_height, wall_thickness))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: wall_color,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, wall_height / 2.0, -wall_size / 2.0),
+        RigidBody::Fixed,
+        Collider::cuboid(wall_size / 2.0, wall_height / 2.0, wall_thickness / 2.0),
+        CollisionGroups::new(WALL_GROUP, Group::ALL.difference(ENEMY_GROUP)),
+    ));
+
+    // South
+    commands.spawn((
+        Name::new("Wall South"),
+        DespawnOnExit(GameStateMachine::Level),
+        DespawnOnExit(Screen::Gameplay),
+        Mesh3d(meshes.add(Cuboid::new(wall_size, wall_height, wall_thickness))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: wall_color,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, wall_height / 2.0, wall_size / 2.0),
+        RigidBody::Fixed,
+        Collider::cuboid(wall_size / 2.0, wall_height / 2.0, wall_thickness / 2.0),
+        CollisionGroups::new(WALL_GROUP, Group::ALL.difference(ENEMY_GROUP)),
+    ));
+
+    // East
+    commands.spawn((
+        Name::new("Wall East"),
+        DespawnOnExit(GameStateMachine::Level),
+        DespawnOnExit(Screen::Gameplay),
+        Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, wall_size))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: wall_color,
+            ..default()
+        })),
+        Transform::from_xyz(wall_size / 2.0, wall_height / 2.0, 0.0),
+        RigidBody::Fixed,
+        Collider::cuboid(wall_thickness / 2.0, wall_height / 2.0, wall_size / 2.0),
+        CollisionGroups::new(WALL_GROUP, Group::ALL.difference(ENEMY_GROUP)),
+    ));
+
+    // West
+    commands.spawn((
+        Name::new("Wall West"),
+        DespawnOnExit(GameStateMachine::Level),
+        DespawnOnExit(Screen::Gameplay),
+        Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, wall_size))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: wall_color,
+            ..default()
+        })),
+        Transform::from_xyz(-wall_size / 2.0, wall_height / 2.0, 0.0),
+        RigidBody::Fixed,
+        Collider::cuboid(wall_thickness / 2.0, wall_height / 2.0, wall_size / 2.0),
+        CollisionGroups::new(WALL_GROUP, Group::ALL.difference(ENEMY_GROUP)),
     ));
 
     // MIRROR (VERY visible)
@@ -330,37 +415,41 @@ pub fn spawn_level(
     ));
 
     // Torch
-    // let torch_range = 4.;
-    // commands.spawn((
-    //     Name::new("Torch"),
-    //     DespawnOnExit(GameStateMachine::Level),DespawnOnExit(Screen::Gameplay),
-    //     Visibility::default(),
-    //     Transform::from_xyz(3.0, 0., 3.0),
-    //     Torch(torch_range),
-    //     RigidBody::Fixed,
-    //     Collider::cuboid(0.5, 0.5, 0.5),
-    //     children![
-    //         (
-    //             Visibility::default(),
-    //             SceneRoot(assets.lamp.clone()),
-    //             Transform::from_scale(vec3(0.2, 0.2, 0.2)),
-    //         ),
-    //         (
-    //             Transform::from_xyz(0.0, 2.5, 0.0),
-    //             PointLight {
-    //                 color: TORCH_COLOR,
-    //                 intensity: 100000.0,
-    //                 range: torch_range + 3.,
-    //                 radius: std::f32::consts::PI,
-    //                 ..default()
-    //             },
-    //         )
-    //     ],
-    // ));
-
+    if let Some(torch) = &game_state.torch {
+        commands.spawn((
+            Name::new("Torch"),
+            DespawnOnExit(GameStateMachine::Level),
+            DespawnOnExit(Screen::Gameplay),
+            Visibility::default(),
+            Transform::from_xyz(3.0, 0., 3.0),
+            Torch {
+                range: torch.range,
+                on_timer: Timer::from_seconds(torch.on_seconds, TimerMode::Once),
+                off_timer: Timer::from_seconds(torch.off_seconds, TimerMode::Once),
+                is_on: true,
+            },
+            RigidBody::Fixed,
+            Collider::cuboid(0.5, 0.5, 0.5),
+            children![
+                (
+                    Visibility::default(),
+                    SceneRoot(assets.lamp.clone()),
+                    Transform::from_scale(vec3(0.2, 0.2, 0.2)),
+                ),
+                (
+                    Transform::from_xyz(0.0, 2.5, 0.0),
+                    PointLight {
+                        color: TORCH_COLOR,
+                        intensity: 100000.0,
+                        range: torch.range + 3.,
+                        radius: std::f32::consts::PI,
+                        ..default()
+                    },
+                )
+            ],
+        ));
+    }
     // Player
-    let flashlight_range = 6.0;
-    let flashlight_angle = 0.2;
     commands.spawn((
         Name::new("Player"),
         DespawnOnExit(GameStateMachine::Level),
@@ -382,6 +471,7 @@ pub fn spawn_level(
         Visibility::default(),
         RigidBody::KinematicPositionBased,
         Collider::cuboid(0.5, 0.5, 0.5),
+        CollisionGroups::new(PLAYER_GROUP, Group::ALL),
         Transform::from_translation(Vec3::new(0.0, 1.0, 0.0)),
         KinematicCharacterController::default(),
         children![
@@ -392,11 +482,11 @@ pub fn spawn_level(
                 PlayerSpotlight,
                 Transform::from_xyz(0.0, -0.8, 0.0),
                 SpotLight {
-                    color: LIGHT_COLOR,
-                    outer_angle: flashlight_angle,
-                    inner_angle: flashlight_angle - 0.1,
-                    range: flashlight_range,
-                    intensity: 500000.0,
+                    color: game_state.flashlight.color,
+                    outer_angle: game_state.flashlight.angle,
+                    inner_angle: game_state.flashlight.angle - 0.1,
+                    range: game_state.flashlight.range,
+                    intensity: game_state.flashlight.intensity,
                     ..default()
                 },
             ),
@@ -406,11 +496,11 @@ pub fn spawn_level(
                 DespawnOnExit(Screen::Gameplay),
                 Transform::from_xyz(0.0, 2., 0.0),
                 SpotLight {
-                    color: LIGHT_COLOR,
-                    outer_angle: flashlight_angle,
-                    inner_angle: flashlight_angle - 0.1,
-                    range: flashlight_range,
-                    intensity: 500000.0,
+                    color: game_state.flashlight.color,
+                    outer_angle: game_state.flashlight.angle,
+                    inner_angle: game_state.flashlight.angle - 0.1,
+                    range: game_state.flashlight.range,
+                    intensity: game_state.flashlight.intensity,
                     ..default()
                 },
             ),
@@ -690,11 +780,10 @@ fn check_torch(
 
     for (torch_transform, torch) in &torches {
         let torch_pos = torch_transform.translation();
-        let range = torch.0;
 
         for (entity, enemy_transform) in &enemies {
             let d = torch_pos.distance(enemy_transform.translation());
-            if d <= range {
+            if d <= torch.range && torch.is_on {
                 hit_enemies.insert(entity);
             }
         }
@@ -791,18 +880,26 @@ fn enemy_chase_player(
             &SpeedFactor,
             Has<Spotlighted>,
             Has<Torchlit>,
+            Has<Boss>,
         ),
         With<Enemy>,
     >,
 ) {
     let player_pos = player.translation;
 
-    for (mut enemy_transform, mut ext_force, velocity, speed_factor, is_spotlighted, is_torchlit) in
-        &mut enemies
+    for (
+        mut enemy_transform,
+        mut ext_force,
+        velocity,
+        speed_factor,
+        is_spotlighted,
+        is_torchlit,
+        is_boss,
+    ) in &mut enemies
     {
         enemy_transform.look_at(player_pos, Vec3::Y);
 
-        if is_spotlighted || is_torchlit {
+        if !is_boss && (is_spotlighted || is_torchlit) {
             ext_force.force = Vec3::ZERO;
             continue;
         }
@@ -817,21 +914,21 @@ fn enemy_chase_player(
     }
 }
 
-fn calc_size(health: f32) -> f32 {
+fn calc_size(health: f32, is_boss: bool) -> f32 {
     let t = (health / 100.0).clamp(0.0, 1.0);
-    let min_size: f32 = 0.3;
-    let max_size: f32 = 1.;
+    let min_size: f32 = if is_boss { 0.03 } else { 0.3 };
+    let max_size: f32 = 1.0;
     // Use a square root curve allowing enemies to be larger at low health
-    min_size + (max_size - min_size) * t.sqrt()
+    min_size + (max_size - min_size) * 1.5 * t.sqrt()
 }
 
 fn enemy_size(
-    enemies: Query<(&Health, &Children), (With<Enemy>, Changed<Health>)>,
+    enemies: Query<(&Health, &Children, Has<Boss>), (With<Enemy>, Changed<Health>)>,
     children2_query: Query<&Children>,
     mut vox: Query<&mut Transform, With<Vox>>,
 ) {
-    for (health, children) in enemies.iter() {
-        let scale = calc_size(health.0);
+    for (health, children, is_boss) in enemies.iter() {
+        let scale = calc_size(health.0, is_boss);
         for child in children {
             if let Ok(children2) = children2_query.get(*child) {
                 for child2 in children2 {
@@ -847,17 +944,25 @@ fn enemy_size(
 fn enemy_health(
     mut commands: Commands,
     mut enemies: Query<
-        (Entity, &mut Health),
+        (Entity, &mut Health, Has<Boss>),
         (With<Enemy>, Or<(With<Spotlighted>, With<Torchlit>)>),
     >,
     time: Res<Time>,
+    mut next_state: ResMut<NextState<GameStateMachine>>,
     mut game_state: ResMut<GameState>,
 ) {
-    for (entity, mut health) in enemies.iter_mut() {
-        health.0 -= time.delta_secs() * 25.0;
+    for (entity, mut health, is_boss) in enemies.iter_mut() {
+        if is_boss {
+            health.0 -= time.delta_secs() * 5.0;
+        } else {
+            health.0 -= time.delta_secs() * 25.0;
+        }
         if health.0 <= 0.0 {
             game_state.kills_this_night += 1;
             game_state.total_kills += 1;
+            if is_boss {
+                next_state.set(GameStateMachine::End);
+            }
             commands.entity(entity).despawn();
         }
     }
@@ -879,7 +984,7 @@ fn player_health(
         }
     }
     if player.1.0 <= 0.0 {
-        game_state.set(GameStateMachine::Shop);
+        game_state.set(GameStateMachine::Dead);
     }
 }
 
@@ -919,22 +1024,19 @@ fn enemy_spawner(
     mut commands: Commands,
     mut rng: Single<&mut WyRand, With<GlobalRng>>,
     assets: Res<GameAssets>,
-    enemies: Query<Entity, With<Enemy>>,
+    enemies: Query<(Entity, Has<Boss>), With<Enemy>>,
     player_transform: Single<&Transform, With<Player>>,
     game_state: Res<GameState>,
 ) {
     if game_state.night_number == 1 && game_state.kills_this_night == 0 {
         if enemies.is_empty() {
-            spawn_enemy(
-                &mut commands,
-                -10.0,
-                -10.0,
-                assets.vox5.clone(),
-                3.0,
-                60.0,
-                0.6,
-            );
+            spawn_enemy(&mut commands, -10.0, -10.0, assets.vox5.clone(), 3.0, 60.0);
         }
+    } else if game_state.survived_seconds_this_night >= 180.0 {
+        if enemies.iter().any(|(_, has_boss)| has_boss) {
+            return;
+        }
+        spawn_boss(&mut commands, &assets);
     } else {
         let total_enemies = 10 + (game_state.survived_seconds_this_night / 5.0).floor() as usize;
         let enemies_to_spawn = total_enemies - enemies.count();
@@ -942,7 +1044,6 @@ fn enemy_spawner(
         for _ in 0..enemies_to_spawn.max(0) {
             let max_health = 10. + (game_state.survived_seconds_this_night / 5.0);
             let health = rng.random_range(5.0..max_health);
-            let scale = calc_size(health);
             // Spawn behind the player
             let back = player_transform.rotation * Vec3::Z;
             let base_angle = back.z.atan2(back.x);
@@ -962,13 +1063,116 @@ fn enemy_spawner(
                 5 => assets.vox5.clone(),
                 _ => unreachable!(),
             };
-            spawn_enemy(&mut commands, x, z, vox, speed_factor, health, scale);
+            spawn_enemy(&mut commands, x, z, vox, speed_factor, health);
         }
     }
 }
 
 fn tick_player_time(mut game_state: ResMut<GameState>, time: Res<Time>) {
     game_state.survived_seconds_this_night += time.delta_secs();
+}
+
+fn torch_on_off(
+    torch: Single<(&mut Torch, &Children)>,
+    mut point_lights: Query<&mut Visibility, With<PointLight>>,
+) {
+    for child in torch.1 {
+        if let Ok(mut point_light) = point_lights.get_mut(*child) {
+            *point_light = if torch.0.is_on {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            };
+        }
+    }
+}
+
+fn tick_torch_timers(mut torch: Single<(&mut Torch, &Children)>, time: Res<Time>) {
+    torch.0.is_on = !torch.0.on_timer.is_finished();
+
+    if !torch.0.on_timer.is_finished() {
+        torch.0.on_timer.tick(time.delta());
+        if torch.0.on_timer.just_finished() {
+            torch.0.off_timer.reset();
+        }
+    }
+
+    if !torch.0.off_timer.is_finished() && torch.0.on_timer.is_finished() {
+        torch.0.off_timer.tick(time.delta());
+
+        if torch.0.off_timer.just_finished() {
+            torch.0.on_timer.reset();
+        }
+    }
+}
+
+fn spawn_boss(commands: &mut Commands, assets: &GameAssets) {
+    commands
+        .spawn((
+            Visibility::default(),
+            Enemy,
+            Name::new("Enemy"),
+            RigidBody::Dynamic,
+            Collider::cuboid(0.5, 0.5, 0.5),
+            CollisionGroups::new(ENEMY_GROUP, Group::ALL.difference(WALL_GROUP)),
+            Transform::from_translation(vec3(-5., 1., -5.)),
+            Velocity::default(),
+            ExternalForce::default(),
+            Damping {
+                linear_damping: 5.0,
+                angular_damping: 1.0,
+            },
+            LockedAxes::TRANSLATION_LOCKED_Y | LockedAxes::ROTATION_LOCKED,
+            Ccd::enabled(),
+            SpeedFactor(1.5),
+            Health(100.),
+            children![
+                (
+                    Name::new("Enemy Vox"),
+                    DespawnOnExit(GameStateMachine::Level),
+                    DespawnOnExit(Screen::Gameplay),
+                    Visibility::default(),
+                    Transform::from_scale(vec3(0.125 * 5., 0.06 * 5., 0.125 * 5.))
+                        .with_translation(vec3(-1., -1., -0.5)),
+                    children![(SceneRoot(assets.vox5.clone()), Vox, Transform::default())]
+                ),
+                (
+                    Name::new("Enemy Down Spotlight"),
+                    DespawnOnExit(GameStateMachine::Level),
+                    DespawnOnExit(Screen::Gameplay),
+                    EnemySpotlight,
+                    Visibility::Hidden,
+                    Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+                    SpotLight {
+                        color: LIGHT_COLOR,
+                        outer_angle: 1.,
+                        range: 8.,
+                        intensity: 100000.0,
+                        ..default()
+                    },
+                ),
+                (
+                    Name::new("Enemy Torchlit Spotlight"),
+                    DespawnOnExit(GameStateMachine::Level),
+                    DespawnOnExit(Screen::Gameplay),
+                    EnemyTorchSpotlight,
+                    Visibility::Hidden,
+                    Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+                    SpotLight {
+                        color: TORCH_COLOR,
+                        outer_angle: 1.,
+                        range: 8.,
+                        intensity: 100000.0,
+                        ..default()
+                    },
+                )
+            ],
+        ))
+        .insert((
+            Boss,
+            DespawnOnExit(Screen::Gameplay),
+            DespawnOnExit(GameStateMachine::Level),
+        ));
 }
 
 fn spawn_enemy(
@@ -978,8 +1182,8 @@ fn spawn_enemy(
     vox: Handle<Scene>,
     speed_factor: f32,
     health: f32,
-    scale: f32,
 ) {
+    let scale = calc_size(health, false);
     commands
         .spawn((
             Visibility::default(),
@@ -987,6 +1191,7 @@ fn spawn_enemy(
             Name::new("Enemy"),
             RigidBody::Dynamic,
             Collider::cuboid(0.5, 0.5, 0.5),
+            CollisionGroups::new(ENEMY_GROUP, Group::ALL.difference(WALL_GROUP)),
             Transform::from_translation(vec3(x, 1., z)),
             Velocity::default(),
             ExternalForce::default(),

@@ -1,10 +1,7 @@
 use bevy::prelude::*;
-use bevy_rand::prelude::*;
-use rand::Rng;
 
 use crate::{
     game::{GameState, GameStateMachine},
-    quotes::QUOTES,
     screens::Screen,
     theme::widget,
 };
@@ -13,13 +10,11 @@ pub(super) fn plugin(app: &mut App) {
     app.add_systems(OnEnter(GameStateMachine::Intro), spawn_intro);
 }
 
-fn spawn_intro(
-    mut commands: Commands,
-    game_state: Res<GameState>,
-    mut rng: Single<&mut WyRand, With<GlobalRng>>,
-) {
-    let random_quote_idx = rng.random_range(0..18);
-    let [quote, author] = QUOTES[random_quote_idx];
+fn spawn_intro(mut commands: Commands, mut game_state: ResMut<GameState>) {
+    let quotes_len = game_state.quotes.len();
+    let (quote, author) = game_state.quotes[game_state.current_quote_index].clone();
+    game_state.current_quote_index = (game_state.current_quote_index + 1) % quotes_len;
+
     commands.spawn((
         widget::ui_root("Main Menu"),
         GlobalZIndex(1),

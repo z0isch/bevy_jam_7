@@ -1,3 +1,5 @@
+mod dead;
+mod end;
 mod hud;
 mod intro;
 mod level;
@@ -7,8 +9,10 @@ use bevy::{
     image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor},
     prelude::*,
 };
+use bevy_rand::prelude::*;
+use rand::seq::SliceRandom;
 
-use crate::asset_tracking::LoadResource;
+use crate::{asset_tracking::LoadResource, quotes::QUOTES};
 
 pub const LIGHT_COLOR: Color = Color::srgb(1., 195. / 255., 0.0);
 
@@ -18,7 +22,9 @@ pub enum GameStateMachine {
     Initial,
     Intro,
     Level,
+    Dead,
     Shop,
+    End,
 }
 
 #[derive(Resource, Debug, Reflect)]
@@ -27,21 +33,62 @@ pub struct GameState {
     kills_this_night: usize,
     survived_seconds_this_night: f32,
     total_kills: usize,
+    spent: usize,
+    flashlight: Flashlight,
+    torch: Option<Torch>,
+    quotes: Vec<(String, String)>,
+    current_quote_index: usize,
+}
+
+#[derive(Resource, Debug, Reflect)]
+pub struct Flashlight {
+    angle: f32,
+    range: f32,
+    intensity: f32,
+    color: Color,
+}
+
+#[derive(Resource, Debug, Reflect)]
+pub struct Torch {
+    range: f32,
+    on_seconds: f32,
+    off_seconds: f32,
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_state::<GameStateMachine>();
+    app.insert_state::<GameStateMachine>(GameStateMachine::Initial);
+    let mut quotes: Vec<(String, String)> =
+        QUOTES.map(|[a, b]| (a.to_string(), b.to_string())).into();
+    let mut rng = app
+        .world_mut()
+        .query_filtered::<&mut WyRand, With<GlobalRng>>();
+    if let Ok(mut rng) = rng.single_mut(app.world_mut()) {
+        quotes.shuffle(&mut rng);
+    }
+
     app.insert_resource(GameState {
         night_number: 1,
         kills_this_night: 0,
         survived_seconds_this_night: 0.0,
         total_kills: 0,
+        spent: 0,
+        flashlight: Flashlight {
+            angle: 0.35,
+            range: 6.0,
+            intensity: 500000.0,
+            color: LIGHT_COLOR,
+        },
+        torch: None,
+        quotes,
+        current_quote_index: 0,
     });
     app.load_resource::<GameAssets>();
     app.add_plugins(intro::plugin);
     app.add_plugins(shop::plugin);
     app.add_plugins(level::plugin);
     app.add_plugins(hud::plugin);
+    app.add_plugins(dead::plugin);
+    app.add_plugins(end::plugin);
 }
 
 pub fn start(mut state: ResMut<NextState<GameStateMachine>>) {
